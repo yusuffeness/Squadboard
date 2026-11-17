@@ -2,7 +2,7 @@
 
 17 Kasım 2026 · Claude Code **2.1.150** · Windows 11 · Pro abonelik (claude.ai girişi)
 
-Bu notlar `packages/spike` içindeki deneylerin sonucu. Ham çıktılar `packages/spike/fixtures/` altında; her `*.jsonl` / `*.json` dosyasının yanında komut satırı, exit code, süre, stderr ve satır zamanlamalarını tutan bir `*.meta.json` var. Fixture'lardan ev dizini, kullanıcı adı, e-posta ve thinking imzaları (org kimliği gömülü) temizlendi.
+Bu notlar `packages/spike` içindeki deneylerin sonucu. Ham çıktılar `packages/core/test/fixtures/claude-cli/` altında (core'un adapter testleri bunları kullanır, spike silinse de kalır); her `*.jsonl` / `*.json` dosyasının yanında komut satırı, exit code, süre, stderr ve satır zamanlamalarını tutan bir `*.meta.json` var. Fixture'lardan ev dizini, kullanıcı adı, e-posta ve thinking imzaları (org kimliği gömülü) temizlendi.
 
 Yeniden çalıştırmak için: `pnpm --filter @squadboard/spike spike <basic|resume|perms|schema|karar|kill|followups>`. KARAR varyantı için `KARAR_VARIANT=strict`.
 
@@ -129,11 +129,25 @@ Ham sonuçlar: `fixtures/karar-base-results.json`, `fixtures/karar-strict-result
 3. ⚠️ **Zincirleme soru (`19-karar-resume-answer.jsonl`).** `--resume` ile "Karar: JSON file" gönderilince ajan aynı oturuma devam etti, ama hemen **ikinci bir KARAR** sordu ("kayıtta hangi alanlar olsun?") ve yine dosya yazmadı. Katı talimat soruları tek tek sordurtuyor; kullanıcı her seferinde beklemek zorunda kalır.
 4. Sınırlılıklar: tek görev, tek model (sonnet), net görevler çok netti. Gerçekçi görevlerde **gereksiz soru** oranı ölçülmedi.
 
-**Karar için seçenekler (birlikte konuşalım):**
+**Değerlendirilen seçenekler**
 
 - (a) Bloğu çok sorulu yapmak: `{"questions":[{question, options}, …]}`; "tüm açık kararları **tek seferde** sor" talimatı. Zinciri kırar.
 - (b) Kararları Planner'a taşımak: plan aşamasında `--json-schema` ile `openDecisions[]` üretmek, kullanıcı plan onayında cevaplasın. Ajan talimatı gevşek kalır, `--json-schema` güvenilir olduğu için ayrıştırma riski de yok.
 - (c) Ajan bitince sonucu `--json-schema` ile `{status: "done" | "needs_decision", decision?}` olarak döndürmek; serbest metin yerine yapılandırılmış çıktı.
+
+**✅ Karar (17 Kasım 2026): (b), (a) yedek olarak.**
+
+- **Asıl yol: Planner sorar.** Planner, planı `--json-schema` ile üretirken kendi başına veremeyeceği kararları `openDecisions[]` olarak döndürür: `{id, question, options (2–4), taskIds}`. `taskIds` boşsa karar tüm planı etkiler. Kullanıcı bunları **plan onayı ekranında** cevaplar; cevaplar ilgili işlerin talimatına eklenir. Böylece kararlar iş başlamadan, tek seferde alınır; ajan çalışırken beklemez.
+- **Yedek yol: KARAR bloğu.** Ajan çalışırken yine de beklenmedik bir seçimle karşılaşırsa durur ve **tüm açık kararları tek blokta** sorar (zinciri önlemek için çok sorulu biçim tercih edilir). Tek soruluk eski biçim de kabul edilir:
+
+  ````
+  ```karar
+  {"questions": [{"question": "...", "options": ["...", "..."]}]}
+  ```
+  ````
+
+- Kod karşılığı (Aşama 2, `packages/core`): `Plan.openDecisions` / `PlanDecision` (`schemas.ts`), kararın kaynağını tutan `Decision.source: "planner" | "agent"` ve iki biçimi de okuyan `parseKarar()` (`karar.ts`).
+- Ajan talimatında `strict` varyanttaki ölçüt listesi yedek yol için korunur; ama Planner kararları önceden topladığı için ajanın duracağı durumlar azalır. Gerçekçi görevlerde gereksiz soru oranı Planner aşamasında ölçülmeli.
 
 ## 6. Process sonlandırma (`18-kill-*`)
 
@@ -177,7 +191,7 @@ Ajana 120 s süren bir komut (`node -e "setTimeout(…)"`) çalıştırıldı; W
 | 1   | `stream-json` ile `--verbose` "gerekebilir"             | **Zorunlu**                                                            | Runner her zaman ekler.                                                                 |
 | 2   | Listede olmayan araç istenirse "iş durur"               | İş devam eder, `success` biter; red `permission_denials[]`'ta          | Runner `permission_denials`'a bakmalı; izin kartı akışı buna göre.                      |
 | 3   | `--max-turns` bayrağı                                   | Çalışıyor ama `--help`'te yok; `result` alanı gelmiyor, exit 1         | `--max-budget-usd` asıl sınır; `result` opsiyonel tiplenmeli.                           |
-| 4   | KARAR talimatı ("karar gerekiyorsa dur")                | Bu haliyle 0/10; ölçütlerle 10/10 ama zincirleme soru                  | KARAR tasarımı değişmeli (bölüm 5 seçenekleri).                                         |
+| 4   | KARAR talimatı ("karar gerekiyorsa dur")                | Bu haliyle 0/10; ölçütlerle 10/10 ama zincirleme soru                  | Karar verildi: Planner `openDecisions[]`, KARAR çok sorulu yedek (bölüm 5).             |
 | 5   | `--resume` ile her yerden sürdürme (örtük)              | Oturum **cwd'ye bağlı**                                                | Worktree yolu sabit kalmalı ve DB'de saklanmalı; worktree silinmeden önce iş kapanmalı. |
 | 6   | "Durdurma basılınca süreç ağacı sonlandırılır", `execa` | Windows'ta `kill()` yetim bırakır                                      | `taskkill /T /F` (Windows) / process grubu (POSIX).                                     |
 | 7   | Kredi bitince "CLI hata verir" ve maliyet takip edilir  | Stream'de aylık kredi bilgisi yok, sadece `five_hour` rate limit olayı | Kredi bitimi hata metninden yakalanmalı; deney ortamında tetiklenmedi, ölçülemedi.      |

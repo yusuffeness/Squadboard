@@ -80,14 +80,18 @@ Tüm parçalar kullanıcının bilgisayarında çalışır. Dışarı çıkan te
 **Klasör yapısı (monorepo, pnpm workspaces)**
 
 ```
-ekip-panosu/
+squadboard/
   packages/
-    core/      # tipler, şablon şeması, plan şeması, olay tipleri
+    core/      # tipler, Zod şemaları, durum makinesi, stream-json adaptörü, KARAR ve plan doğrulama
+               # test/fixtures/claude-cli: gerçek CLI kayıtları (adaptör testleri kullanır)
     server/    # Fastify, orkestratör, runner, git, SQLite
     web/       # React arayüzü (Vite)
+    spike/     # Aşama 1 keşif kodu, ürün kodu değil (silinebilir)
   templates/   # hazır ekip şablonları (fullstack, api, fix)
-  docs/
+  docs/        # ARCHITECTURE.md, claude-cli-notes.md (Aşama 1 bulguları)
 ```
+
+`core` hiçbir Node'a özel ya da arayüz paketine bağlı değildir (tek bağımlılığı `zod`); hem sunucuda hem tarayıcıda çalışır.
 
 ## Teknoloji yığını
 
@@ -99,7 +103,7 @@ Tek dil: TypeScript. Sunucu, arayüz ve ortak tipler aynı dilde olur, katkı ve
 | Paket yönetimi | pnpm workspaces | Monorepo, hızlı kurulum | npm workspaces |
 | Sunucu | Fastify | Hızlı, şema doğrulamalı, SSE kolay | Hono, Express |
 | Canlı olaylar | Server-Sent Events | Tek yönlü akış yeter, WebSocket'ten basit | WebSocket |
-| Süreç yönetimi | `execa` | `claude` sürecini satır satır okumak ve sonlandırmak için | `child_process` |
+| Süreç yönetimi | `execa` ya da `child_process` + süreç ağacı sonlandırma | `claude` sürecini satır satır okumak ve sonlandırmak için. Hangisi seçilirse seçilsin Windows'ta `taskkill /T /F`, POSIX'te süreç grubu gerekir (bkz. Claude Code entegrasyonu) | — |
 | Git | `git` komutu (`simple-git` sarıcı) | Worktree ve diff için resmi komutlar | `isomorphic-git` (worktree zayıf) |
 | Depo | SQLite (`better-sqlite3`) + Drizzle ORM | Kurulum gerektirmez, tek dosya | JSON dosyaları |
 | Şema doğrulama | Zod | Plan, şablon ve olay şemaları | Ajv |
@@ -115,39 +119,57 @@ Tek dil: TypeScript. Sunucu, arayüz ve ortak tipler aynı dilde olur, katkı ve
 
 Uygulama Claude Code'u başsız modda çalıştırır. Kimlik bilgisine dokunmaz, kullanıcının kendi girişini kullanan resmi CLI'ı çağırır.
 
-**Kullanılacak bayraklar** ([CLI belgeleri](https://docs.claude.com/en/docs/claude-code/headless), [bayrak listesi](https://www.mintlify.com/shanraisshan/claude-code-best-practice/best-practices/cli-startup-flags))
+**Kullanılacak bayraklar** ([CLI belgeleri](https://docs.claude.com/en/docs/claude-code/headless), [bayrak listesi](https://www.mintlify.com/shanraisshan/claude-code-best-practice/best-practices/cli-startup-flags)). Aşama 1'de Claude Code 2.1.150 ile tek tek denendi; ayrıntılar ve ham çıktılar [claude-cli-notes.md](claude-cli-notes.md) içinde.
 
-| Bayrak | Ne için |
-| --- | --- |
-| `-p`, `--print` | Etkileşimsiz çalıştırma |
-| `--output-format stream-json` | Satır satır JSON olayları (canlı izleme) |
-| `--output-format json` | Tek seferde sonuç; `result`, `session_id`, `total_cost_usd`, `num_turns` gibi alanlar |
-| `--resume <session_id>`, `--session-id` | Oturumu devam ettirme (karar, değişiklik isteği) |
-| `--permission-mode`, `--allowedTools` | İzin politikası ve araç beyaz listesi |
-| `--append-system-prompt` | Ajanın rol talimatını eklemek |
-| `--json-schema` | Planner ve Reviewer çıktısını şemaya zorlamak (yalnızca print modunda) |
-| `--max-turns`, `--max-budget-usd` | Bir koşunun sınırı |
-| `--include-partial-messages` | Kısmi metin akışı (isteğe bağlı) |
+| Bayrak | Ne için | Aşama 1'de görülen |
+| --- | --- | --- |
+| `-p`, `--print` | Etkileşimsiz çalıştırma | Çalışıyor |
+| `--output-format stream-json` | Satır satır JSON olayları (canlı izleme) | **`--verbose` zorunlu**, yoksa exit 1 |
+| `--output-format json` | Tek seferde sonuç; `result`, `session_id`, `total_cost_usd`, `num_turns` gibi alanlar | Çalışıyor |
+| `--session-id <uuid>` | Oturum kimliğini süreci başlatmadan biz belirleriz, DB'ye önceden yazılır | Çalışıyor |
+| `--resume <session_id>` | Oturumu devam ettirme (karar, izin, değişiklik isteği, durdurulan iş) | Çalışıyor, ama **yalnızca aynı klasörden** |
+| `--fork-session` | Resume ederken yeni oturum kimliği (alternatif deneme) | Çalışıyor |
+| `--permission-mode`, `--allowedTools` | İzin politikası ve araç beyaz listesi; `Bash(npm test:*)` söz dizimi geçerli | Çalışıyor; red işi **durdurmuyor** (aşağıda) |
+| `--tools` | Kullanılabilir araç kümesini daraltmak (Planner ve Reviewer için salt okunur küme) | Çalışıyor |
+| `--append-system-prompt` | Ajanın rol talimatını eklemek | Çalışıyor |
+| `--json-schema` | Planner ve Reviewer çıktısını şemaya zorlamak (yalnızca print modunda) | Çalışıyor; çıktı `result.structured_output` alanında |
+| `--max-budget-usd` | Bir koşunun asıl sınırı | Listede var |
+| `--max-turns` | Tur sınırı | `--help`'te **yok** ama çalışıyor; kaldırılabilir, tek sınır olarak güvenilmez |
+| `--strict-mcp-config` | Kullanıcının MCP sunucularını yüklememek | Çalışıyor |
+| `--include-partial-messages` | Kısmi metin akışı (isteğe bağlı, "yazıyor…" efekti) | Çalışıyor, ilk sürümde gerekmiyor |
 
 **Örnek çağrı (Backend işi)**
 
 ```bash
 cd .ekip/worktrees/auth-api
 claude -p "$GÖREV_METNİ" \
+  --session-id "$RUN_SESSION_ID" \
   --append-system-prompt "$(cat .team/backend.md)" \
   --output-format stream-json --verbose \
   --permission-mode acceptEdits \
   --allowedTools "Read,Edit,Write,Grep,Glob,Bash(npm test:*)" \
-  --max-turns 40
+  --strict-mcp-config \
+  --max-budget-usd 2
 ```
 
-`stream-json` ile sürüme göre `--verbose` gerekebilir; örneklerde çoğunlukla birlikte kullanılıyor.
+`stream-json` ile `--verbose` **zorunludur**; olmadan CLI JSON üretmeden exit 1 ile çıkar.
 
-**Olay ayrıştırma.** Her satır bir JSON nesnesi. Oturum başlangıcında `session_id` alınır, ara mesajlarda araç çağrıları ve sonuçları gelir, son olay süre ve maliyet bilgisini taşır. Alan adları sürüme göre değişebileceğinden ayrıştırıcı ince bir adaptör katmanında durur ve gerçek CLI çıktılarından kaydedilmiş örneklerle test edilir.
+**Olay ayrıştırma.** Her satır bir JSON nesnesi: `system/init` (oturum kimliği, model, araçlar), `assistant`, `user` (araç sonuçları), `rate_limit_event`, en sonda `result` (maliyet, tur sayısı, `permission_denials`, varsa `structured_output`). Bir API mesajı tek olay değildir: her içerik bloğu (thinking, araç çağrısı, metin) aynı `message.id` ile ayrı satır gelir. Ayrıştırıcı `packages/core` içindeki adaptördedir (`createClaudeStreamAdapter`); ham satırları uygulamanın `AgentEvent` tiplerine çevirir, tanımadığı olayı çökmeden `unknown` olarak geçirir ve Aşama 1'de kaydedilen gerçek CLI çıktılarıyla test edilir. Bazı hatalar (bilinmeyen oturum, eksik `--verbose`) yalnızca stderr'e yazılır; bunlar ayrıca sınıflandırılır (`classifyCliStderr`).
 
-**Karar alınması.** Başsız modda ajan sana söz ortasında soru soramaz. Çözüm: ajanın talimatında "karar gerekiyorsa işi durdur ve son mesaja bir `KARAR` bloğu yaz (soru, seçenekler)" denir. Runner bu bloğu yakalar, işi `karar bekliyor` durumuna geçirir, arayüzde Kararın lazım kutusunu gösterir. Seçim gelince aynı oturum `--resume` ile "Karar: …" mesajıyla sürdürülür.
+**Karar alınması.** Başsız modda ajan sana söz ortasında soru soramaz. Aşama 1 ölçümü: "karar gerekiyorsa dur" talimatıyla ajan 10 denemenin hiçbirinde durmadı; ölçütler tek tek sayılınca 10/10 durdu ama cevaptan sonra yeni bir soru sordu (zincirleme soru). Bu yüzden:
 
-**İzin istekleri.** Başsız modda izin sorulamaz; beyaz liste dışındaki araç reddedilir. İzinleri MCP aracına yönlendiren bir bayrak da var (CLI bayrak listesinde), ilk sürümde kullanmayız, adını ve davranışını hedef sürümde doğrulamak gerekir.
+1. **Asıl yol: Planner sorar.** Planner planı üretirken kendi veremeyeceği kararları `openDecisions[]` olarak döndürür (bkz. Plan akışı). Sen bunları **plan onayında** cevaplarsın; cevaplar ilgili işlerin talimatına eklenir. Kararlar iş başlamadan, tek seferde alınır.
+2. **Yedek yol: KARAR bloğu.** Ajan çalışırken yine de beklenmedik bir seçimle karşılaşırsa durur ve son mesajına **tüm açık kararları tek blokta** yazar (`{"questions": [{question, options}]}`; tek soruluk biçim de kabul edilir). Runner bloğu yakalar, işi `waiting_decision` durumuna geçirir, arayüzde Kararın lazım kutusunu gösterir. Seçim gelince aynı oturum `--resume` ile "Karar: …" mesajıyla sürdürülür.
+
+**İzin istekleri.** Başsız modda izin sorulamaz; beyaz liste dışındaki araç reddedilir. ⚠️ Red **işi durdurmaz**: ajan reddi araç sonucu olarak görür, başka yoldan devam eder ya da vazgeçer ve iş `success` ile biter. Reddedilen çağrılar yalnızca `result.permission_denials[]` içinde (araç adı ve tam girdi) listelenir. Bu yüzden runner her işin sonunda bu listeye bakar; boş değilse işi başarılı saymaz, "Şu komuta izin verelim mi?" kartını gösterir. Onay gelirse `--allowedTools` genişletilir ve oturum `--resume` ile "İzin verildi, tekrar dene" mesajıyla sürer. İzinleri MCP aracına yönlendiren bayrak v1'de kullanılmaz.
+
+**Oturum ve süreç.**
+
+- Oturumlar `~/.claude/projects/<klasör>/` altında, **çalışma klasörüne bağlı** tutulur. Bir işin oturumu yalnızca kendi worktree yolundan `--resume` edilebilir; bu yüzden worktree yolu `runs` tablosunda saklanır ve iş kapanmadan worktree silinmez.
+- Durdurma: Windows'ta `child.kill()` yalnızca `claude.exe`'yi öldürür, ajanın başlattığı bash ve node süreçleri yetim kalır. Süreç ağacı Windows'ta `taskkill /PID <pid> /T /F` ile, POSIX'te süreç grubu (`detached` + `process.kill(-pid)`) ile sonlandırılır. Öldürülen koşuda `result` olayı gelmez; runner bunu `stopped` sayar. Öldürülen oturum sonradan `--resume` ile sürdürülebilir.
+- Windows'ta npm'in `claude.cmd` dosyası yalnızca `bin/claude.exe`'ye yönlendirir; `.exe` doğrudan çalıştırılır (`shell: true` argüman tırnaklamasını bozar).
+- Sunucu bir Claude Code oturumunun içinden başlatılırsa `CLAUDECODE`, `CLAUDE_CODE_*` gibi ortam değişkenleri alt süreçlere geçer; runner bunları temizleyerek başlatır.
+- `-p` modunda kullanıcının global ayarları, skill'leri ve hafızası yüklenir; ajan davranışı kullanıcıdan kullanıcıya değişebilir. `--strict-mcp-config` MCP sunucularını kapatır; `--setting-sources` ileride değerlendirilir (`--bare` abonelikle çalışmaz).
 
 **Worktree.** Claude Code'un kendi [`--worktree`/`-w` bayrağı](https://claudefa.st/blog/guide/development/worktree-guide) `.claude/worktrees/<ad>/` altında çalışma dizini açıyor ve değişiklik yoksa temizliyor. Biz ilk sürümde worktree'yi kendimiz `git worktree add` ile açıyoruz: dal adını (`team/auth-api`) ve bir önceki işin dalından başlatmayı biz belirlemek istiyoruz. Bu bir tasarım tercihi; `-w` daha az kod demek, ikisi de denenebilir.
 
@@ -196,7 +218,7 @@ Karar gerekiyorsa işi durdur ve son mesaja bir KARAR bloğu yaz: soru ve seçen
 
 ## Plan akışı, bağımlılık ve çakışma yönetimi
 
-Planlayıcı çıktısı kesin bir JSON şemasına bağlıdır (`--json-schema` ile zorlanır, Zod ile bir kez daha doğrulanır). Her iş şunları taşır: `id`, `title`, `agent`, `dependsOn[]`, `expectedFiles[]`.
+Planlayıcı çıktısı kesin bir JSON şemasına bağlıdır (`--json-schema` ile zorlanır; sonuç `result.structured_output` alanından okunur ve Zod ile bir kez daha doğrulanır). Her iş şunları taşır: `id`, `title`, `agent`, `dependsOn[]`, `expectedFiles[]`. Planlayıcının kendi başına veremediği kararlar `openDecisions[]` içinde gelir: `id`, `question`, `options` (2–4), `taskIds` (boşsa tüm planı etkiler).
 
 ```json
 {
@@ -204,19 +226,24 @@ Planlayıcı çıktısı kesin bir JSON şemasına bağlıdır (`--json-schema` 
     { "id": "db", "title": "users ve oturum tabloları", "agent": "database", "dependsOn": [], "expectedFiles": ["db/migrations/*"] },
     { "id": "api", "title": "Giriş ve kayıt API", "agent": "backend", "dependsOn": ["db"], "expectedFiles": ["src/api/auth.ts", "src/types/user.ts"] },
     { "id": "ui", "title": "Giriş formu", "agent": "frontend", "dependsOn": ["api"], "expectedFiles": ["src/pages/login.tsx"] }
+  ],
+  "openDecisions": [
+    { "id": "session", "question": "Oturum nasıl tutulsun?", "options": ["Cookie + sunucu oturumu", "JWT"], "taskIds": ["db", "api"] }
   ]
 }
 ```
+
+Doğrulama ve sıralama `packages/core` içindedir (`validatePlan`, `computeStages`, `schedulePlan`): tekrarlanan ya da bilinmeyen iş kimlikleri, bilinmeyen ajanlar ve bağımlılık döngüleri (döngünün yoluyla birlikte) hata olarak raporlanır.
 
 **Aşamalar.** Sunucu, `dependsOn` bağlarından topolojik sıralama ile aşamaları hesaplar. Aynı aşamadaki işler eşzamanlılık sınırına kadar paralel başlar.
 
 **Çakışma önleme (3 katman)**
 
-1. Plan zamanı: aynı aşamadaki iki işin `expectedFiles` listeleri çakışıyorsa sunucu ikisini ardışık yapar (ek bağımlılık ekler) ve plan ekranında bunu uyarı olarak gösterir. Planlayıcı de aynı kuralı talimat olarak alır.
+1. Plan zamanı: aynı aşamadaki iki işin `expectedFiles` listeleri çakışıyorsa (glob desenleri dahil, emin olunamayan durumda çakışıyor sayılır) sunucu ikisini ardışık yapar (plandaki sırasıyla, sonraki öncekine bağımlı olur) ve plan ekranında bunu uyarı olarak gösterir. Aynı dosyaya dokunan üç iş `a → b → c` zinciri olur. Planlayıcı de aynı kuralı talimat olarak alır.
 2. Çalışma zamanı: her iş kendi worktree ve dalında koşar. Bağımlı bir iş, önceki işin dalından başlar (yığın dallar), böylece önceki işin tip ve dosyalarını görür.
 3. Birleştirme zamanı: iş bitince `git diff --name-only` gerçek dosyaları verir. Beklenenin dışına çıkılmışsa inceleme ekranında bu not edilir. Birleştirme çakışırsa iş "Değişiklik gerekli" durumuna düşer ve ilgili ajan güncel dalı alarak çözmesi için çalıştırılır.
 
-**Plan onayı.** Ayar açıksa hiçbir ajan plan onaylanmadan başlamaz. Kullanıcı kart silebilir, ekleyebilir, ajanı değiştirebilir; sunucu değişiklikten sonra aşamaları ve çakışma kontrolünü yeniden hesaplar. "Planı yeniden oluştur" aynı isteği Planner'a tekrar verir.
+**Plan onayı.** Ayar açıksa hiçbir ajan plan onaylanmadan başlamaz. Planlayıcının `openDecisions` soruları bu ekranda cevaplanır; cevaplanmamış karar varken plan başlatılamaz. Kullanıcı kart silebilir, ekleyebilir, ajanı değiştirebilir; sunucu değişiklikten sonra aşamaları ve çakışma kontrolünü yeniden hesaplar. "Planı yeniden oluştur" aynı isteği Planner'a tekrar verir.
 
 **Reviewer.** Salt okunur araçlarla çalışır (`Read, Grep, Glob` ve diff için kısıtlı `Bash`). Çıktısı şemalı JSON: `summary` (sade dil), `risk` (düşük, orta, yüksek), `checks[]` (başlık, not, durum), `files[]`. Bu çıktı İnceleme ekranını doğrudan besler. Proje ayarlarında bir test komutu tanımlıysa test sonucu da kontrollere eklenir.
 
@@ -229,9 +256,9 @@ Bir SQLite dosyası (`.ekip/panosu.db`), proje klasöründe. Olaylar yalnızca e
 | `projects` | id, yol, ana dal, test komutu, ayarlar |
 | `requests` | id, project, metin, oluşturma zamanı, plan JSON'u |
 | `tasks` | id, request, başlık, ajan, bağımlılıklar, beklenen dosyalar, dal, worktree yolu, durum, aşama |
-| `runs` | id, task, oturum kimliği, başlangıç, bitiş, sonuç durumu, maliyet, tur sayısı |
+| `runs` | id, task, oturum kimliği, çalışma klasörü (resume için), başlangıç, bitiş, sonuç durumu, maliyet, tur sayısı |
 | `events` | id, run, sıra, tip, ham JSON (araç çağrısı, mesaj, sonuç) |
-| `decisions` | id, task, soru, seçenekler, seçim, zaman |
+| `decisions` | id, request, task (Planner kararlarında boş), kaynak (`planner` / `agent`), soru, seçenekler, seçim, zaman |
 | `reviews` | id, task, özet, risk, kontroller, dosyalar, karar (onay, geri gönder) |
 
 **İş durumları**
@@ -241,13 +268,15 @@ Bir SQLite dosyası (`.ekip/panosu.db`), proje klasöründe. Olaylar yalnızca e
 | `planned` | Planlandı | Plan onaylandı |
 | `blocked` | Planlandı | Bağımlı olduğu iş bitmedi |
 | `running` | Çalışıyor | Başladı |
-| `waiting_decision` | Çalışıyor (Kararın lazım) | Ajan KARAR bloğu yazdı |
+| `waiting_decision` | Çalışıyor (Kararın lazım) | Ajan KARAR bloğu yazdı (yedek yol) ya da izin reddedildi |
 | `in_review` | İncelemede | İş bitti, Reviewer çalışıyor ya da sıra sende |
 | `changes_requested` | Çalışıyor | Sen geri gönderdin |
 | `done` | Bitti | Birleştirildi |
 | `failed`, `stopped` | Çalışıyor (kart kırmızı/gri) | Hata ya da kullanıcı durdurdu |
 
-Sunucu başlangıcında çalışıyor görünen ama süreci ölen işleri `stopped` yapar ve "Kaldığı yerden sürdür" seçeneği sunar (`--resume` ile).
+Geçişler `packages/core` içindeki durum makinesinde tanımlıdır; geçersiz geçiş hata verir. Bir iş `in_review`'dan geçmeden `done` olamaz.
+
+Sunucu başlangıcında çalışıyor görünen ama süreci ölen işleri `stopped` yapar ve "Kaldığı yerden sürdür" seçeneği sunar (`--resume` ile, işin kendi worktree klasöründen).
 
 ## Güvenlik ve izinler
 
@@ -256,7 +285,7 @@ Uygulama bilgisayarında kod çalıştıran ajanları yönetiyor; bu yüzden var
 - **Yerel sunucu.** Yalnızca `127.0.0.1`'e bağlanır. Her başlatışta rastgele bir oturum anahtarı üretilir; arayüz anahtarla açılır, API çağrılarında `Origin` ve `Host` başlıkları denetlenir. Böylece başka bir web sitesi yerel sunucuya komut gönderemez.
 - **Ajan sınırları.** Her ajan yalnızca kendi worktree klasöründe ve kendi araç beyaz listesiyle çalışır. Her yetkiyi atlayan bayrak (`--dangerously-skip-permissions`) kullanılmaz.
 - **Gizli dosyalar.** `.env` ve anahtar dosyalarının okunmasını yasaklayan izin kuralları şablonla gelir. Kural söz dizimi hedef Claude Code sürümünde doğrulanmalıdır.
-- **Sınırlar.** `--max-turns`, `--max-budget-usd`, iş başına zaman aşımı ve eşzamanlılık üst sınırı (varsayılan 3). Durdurma basılınca süreç ağacı sonlandırılır.
+- **Sınırlar.** `--max-budget-usd` (asıl sınır; `--max-turns` belgelenmemiş olduğu için yalnızca ek önlem), iş başına zaman aşımı ve eşzamanlılık üst sınırı (varsayılan 3). Durdurma basılınca süreç ağacının tamamı sonlandırılır (Windows'ta `taskkill /T /F`); yalnızca `claude` sürecini öldürmek ajanın başlattığı komutları yetim bırakır.
 - **Birleştirme.** Hiçbir dal sen onaylamadan birleşmez. Uzak depoya push v1'de yoktur. Zorla push hiç yoktur.
 - **Komut enjeksiyonu.** Dosya ve web içeriği ajanı yönlendirmeye çalışabilir. Bu yüzden Reviewer çıktısı kesin hakem sayılmaz; diff her zaman "kodun tamamını göster" ile açılabilir, otomatik birleştirme varsayılan değildir.
 - **Veri.** Olaylar ve loglar yalnızca yerel diske yazılır, uygulama telemetri göndermez. Log kaydedilirken bilinen gizli anahtar desenleri maskelenir.
@@ -276,7 +305,7 @@ Uygulama bilgisayarında kod çalıştıran ajanları yönetiyor; bu yüzden var
 **Ürünün bu konudaki davranışı**
 
 - Her çalıştırmanın maliyeti ve tur sayısı (`json` çıktısındaki `total_cost_usd`, `num_turns`) panoda gösterilir, toplam bir gösterge olarak biriktirilir.
-- Kredi bitince CLI'ın hata verdiği durum özel olarak yakalanır; iş `stopped` olur ve kullanıcıya açık bir mesaj gösterilir.
+- Kredi bitince CLI'ın hata verdiği durum özel olarak yakalanır; iş `stopped` olur ve kullanıcıya açık bir mesaj gösterilir. Aşama 1'de görüldü: stream'de aylık kredi hakkında bir alan **yok**, yalnızca 5 saatlik pencereyi bildiren `rate_limit_event` geliyor. Kredi bitimi bu yüzden hata metninden yakalanmalı; deneyde tetiklenemediği için biçimi henüz bilinmiyor.
 - Ayarda `ANTHROPIC_API_KEY` ile çalışma seçeneği bulunur (kullanıcı kendi anahtarını ortam değişkenine koyar, uygulama görmez).
 
 **Marka.** Ürün adında "Claude" geçmeyecek. Kurallar "… Powered by Claude" gibi bir kullanıma izin veriyor. Lisans önerisi: MIT ya da Apache-2.0.
@@ -285,16 +314,22 @@ Uygulama bilgisayarında kod çalıştıran ajanları yönetiyor; bu yüzden var
 
 Tarih vermiyorum; her aşama kendi ölçütüyle biter, bir sonrakine ancak o zaman geçilir.
 
-| Aşama | Kapsam | Bitti sayılır |
-| --- | --- | --- |
-| 0. Prototip | `claude -p` ile tek iş, `stream-json` canlı ekranda, oturum kimliği ve `--resume` | Arayüzden verilen bir istek canlı çıktıyla bitiyor, gerçek CLI çıktıları test örneği olarak kaydedildi |
-| 1. Pano ve worktree | SQLite, işler ve durumlar, worktree ve dal açma, Pano ekranı, durdur ve sürdür | İki iş paralel, farklı dallarda çalışıp biri birleştirilebiliyor |
-| 2. Planner ve zamanlayıcı | Plan JSON şeması, Plan onayı ekranı, bağımlılık ve çakışma kontrolü, KARAR akışı | Tek istekten 4-5 iş sırayla ve paralel çalışıyor, bir karar sorulup iş sürdürülüyor |
-| 3. Reviewer ve cilalama | Reviewer şeması, İnceleme ekranı, test komutu, isim modları, Ekibini kur ekranı | Tasarım taslaklarındaki dört ekranın tam akışı çalışıyor |
-| 4. Yayın | `npx` paketi, Windows/macOS/Linux denemesi, README (kurulum, kredi uyarısı), şablonlar, lisans, kısa demo videosu | Temiz bir bilgisayarda tek komutla kurulup ilk işin bittiği görülüyor |
-| 5. Sonrası | Topluluk şablonları, başka alanlar (içerik ekibi gibi), başka CLI sürücüleri, masaüstü kabuğu | Talebe göre |
+Numaralar "Aşama Planı ve Promptlar" belgesindeki aşamalarla aynıdır.
 
-En önemli ilk adım Aşama 0: planın boşa gitmemesi için gerçek `claude -p` çıktısının biçimini ve KARAR bloğunun güvenilirliğini en başta ölçmek gerekiyor.
+| Aşama | Kapsam | Bitti sayılır | Durum |
+| --- | --- | --- | --- |
+| 0. İskelet | pnpm monorepo, TypeScript strict, ESLint/Prettier/Vitest, boş web sayfası, `GET /health`, CI (Linux + Windows) | `pnpm dev` ile web ve server kalkıyor; lint, test, build ve CI yeşil | ✅ |
+| 1. CLI keşfi | `claude -p` biçimleri, `--resume`, izinler, `--json-schema`, KARAR ölçümü, süreç sonlandırma; gerçek çıktılar kaydedildi | [claude-cli-notes.md](claude-cli-notes.md) yazıldı, KARAR güvenilirliği sayısal | ✅ |
+| 2. Core | Zod şemaları ve tipler, iş durum makinesi, stream-json adaptörü, KARAR ayrıştırıcı, plan doğrulama ve sıralama | Kayıtlı CLI çıktıları adaptörden hatasız geçiyor; geçersiz geçiş ve plan döngüsü testlerle yakalanıyor | ✅ |
+| 3. Runner | `claude -p` sürecini başlatma ve süreç ağacıyla sonlandırma, `--session-id` / `--resume`, `permission_denials` ve stderr hatalarını işleme, ortam değişkeni temizliği | Sunucudan tek bir iş başlatılıyor, olaylar akıyor, durdurulup kendi klasöründen sürdürülebiliyor | |
+| 4. Prototip | Tek iş, `stream-json` olayları canlı ekranda (SSE) | Arayüzden verilen bir istek canlı çıktıyla bitiyor; kredi ve Anthropic sorusu gerçek veriyle değerlendiriliyor | |
+| 5. Pano ve worktree | SQLite, işler ve durumlar, worktree ve dal açma, Pano ekranı, durdur ve sürdür | İki iş paralel, farklı dallarda çalışıp biri birleştirilebiliyor | |
+| 6. Planner ve zamanlayıcı | Planner (`--json-schema`, `openDecisions`), Plan onayı ekranı, bağımlılık ve çakışma kontrolü, KARAR yedek akışı, izin kartı | Tek istekten 4-5 iş sırayla ve paralel çalışıyor; plan kararları onayda cevaplanıyor | |
+| 7. Reviewer ve cilalama | Reviewer şeması, İnceleme ekranı, test komutu, isim modları, Ekibini kur ekranı | Tasarım taslaklarındaki dört ekranın tam akışı çalışıyor | |
+| 8. Yayın | `npx` paketi, Windows/macOS/Linux denemesi, README (kurulum, kredi uyarısı), şablonlar, lisans, kısa demo videosu | Temiz bir bilgisayarda tek komutla kurulup ilk işin bittiği görülüyor | |
+| 9. Sonrası | Topluluk şablonları, başka alanlar (içerik ekibi gibi), başka CLI sürücüleri, masaüstü kabuğu | Talebe göre | |
+
+Aşama 1 en riskli adımdı ve raporun birkaç varsayımını değiştirdi (izin reddi, `--verbose`, KARAR, oturumun klasöre bağlı olması, süreç sonlandırma); bu belge o bulgulara göre güncellendi.
 
 ## Riskler ve açık sorular
 
@@ -308,26 +343,30 @@ En önemli ilk adım Aşama 0: planın boşa gitmemesi için gerçek `claude -p`
 | İnceleme darboğazı | Ajanlar hızlı, sen yavaşsın | Sade Reviewer özeti, küçük işler, eşzamanlılık varsayılanı 3 |
 | Yerel sunucuya kötü amaçlı erişim, komut enjeksiyonu | Dosya zararı ya da sızıntı | Bölüm 10 önlemleri |
 | Kalabalık rakipler | Fark edilmemek | Odak: plan onayı, çakışma tahmini, sade inceleme, şablon ekosistemi |
-| Windows yol ve süreç farkları | Kurulum sorunları | Aşama 1'den itibaren Windows'ta test |
+| Windows yol ve süreç farkları | Kurulum sorunları, yetim süreçler | CI'da Linux ve Windows job'ı; Windows'ta süreç ağacı `taskkill /T /F` ile sonlandırılır |
+| Ajanın gereksiz ya da zincirleme soru sorması | Kullanıcı sürekli bekliyor | Kararları Planner önceden topluyor; KARAR bloğu yedek ve tek seferde çok soru |
 
 **Açık sorular**
 
-- [ ] Ajanlar KARAR bloğunu ne kadar güvenilir yazıyor? Aşama 0'da ölçülür.
-- [ ] Worktree'yi biz mi açalım, yoksa `--worktree` bayrağı mı kullanalım?
-- [ ] İzinleri MCP aracına yönlendiren bayrak ilk sürümde kullanılabilir mi?
-- [ ] Aylık Agent SDK kredisi plan bazında ne kadar ve bitince ne oluyor?
+- [x] Ajanlar KARAR bloğunu ne kadar güvenilir yazıyor? Aşama 1'de ölçüldü: gevşek talimatla 0/10, ölçütlü talimatla 10/10 ama zincirleme soru. Kararları Planner soruyor (aşağıda).
+- [x] Worktree'yi biz mi açalım, yoksa `--worktree` bayrağı mı kullanalım? Biz açıyoruz (aşağıda).
+- [ ] İzinleri MCP aracına yönlendiren bayrak ilk sürümde kullanılabilir mi? (v1'de kullanılmıyor.)
+- [ ] Aylık Agent SDK kredisi plan bazında ne kadar ve bitince ne oluyor? Stream'de bu bilgi yok; Aşama 4'te gerçek veriyle bakılacak.
 - [ ] Üçüncü taraf kuralının bu modelle ilgili yorumu için Anthropic'ten teyit.
-- [ ] Ürün adı ve lisans (MIT mi Apache-2.0 mı)?
-- [ ] İlk sürümde yalnızca Claude Code mı, yoksa baştan çoklu CLI desteği mi?
+- [x] Ürün adı ve lisans: Squadboard, MIT.
+- [x] İlk sürümde yalnızca Claude Code.
+- [ ] macOS/Linux'ta süreç grubu sonlandırma, worktree içinden çalıştırma ve kredi bitince CLI davranışı henüz denenmedi.
+- [ ] Gerçekçi görevlerde Planner'ın ve ajanın gereksiz soru oranı (Aşama 6'da ölçülür).
 
 **Alınan kararlar (17 Kasım 2026)**
 
 - **İlk sürüm yalnızca Claude Code.** Çoklu CLI desteği ve ajan başına model seçimi sonraya. Sürücü soyutlaması baştan hazır kalır, böylece sonra başka CLI eklemek kolay olur.
 - **Worktree'yi biz açıyoruz** (`git worktree add`): dal adı (`team/auth-api`) ve yığın dallar bizde kalır, kullanıcı temiz dal adları görür.
-- **İzinler kullanıcıyı yormasın:** `--permission-mode acceptEdits` ve ajan başına `--allowedTools` beyaz listesi. Ajan listede olmayan bir aracı isterse iş durur, arayüzde "Şu komuta izin verelim mi?" kartı çıkar; onaylanırsa liste genişler ve oturum `--resume` ile sürer. MCP izin bayrağı v1'de kullanılmıyor.
+- **İzinler kullanıcıyı yormasın:** `--permission-mode acceptEdits` ve ajan başına `--allowedTools` beyaz listesi. Ajan listede olmayan bir aracı isterse CLI onu reddeder ama işi durdurmaz; runner iş bitince `result.permission_denials[]`'a bakar, boş değilse arayüzde "Şu komuta izin verelim mi?" kartı çıkar; onaylanırsa liste genişler ve oturum `--resume` ile sürer. MCP izin bayrağı v1'de kullanılmıyor. (Aşama 1 bulgusuyla güncellendi.)
 - **Lisans: MIT.** En düşük sürtünme, katkı vermek ve kullanmak en kolay olanı.
 - **Ürün adı: Squadboard.** npm'de "squadboard" boş. GitHub'da aynı adlı birkaç küçük depo var; biri (sabbour/squadboard) "Squad AI ajanları için yerel kanban panosu" diyor, 0 yıldızlı ama konsept benziyor. Alan adı ve marka kaydı bir kayıtçiden kontrol edilmeli.
-- **Sonraya bırakıldı:** abonelik kredisi ve Anthropic'ten kural teyidi (Aşama 0'dan sonra).
+- **Kararları Planner soruyor** (Aşama 1 ölçümünden sonra). Planner, plan aşamasında açık kararları `openDecisions[]` olarak üretir, kullanıcı plan onayında cevaplar. KARAR bloğu yalnızca ajanın çalışırken karşılaştığı beklenmedik seçimler için yedektir ve tüm soruları tek seferde sorar (çok sorulu biçim).
+- **Sonraya bırakıldı:** abonelik kredisi ve Anthropic'ten kural teyidi (Aşama 4 prototipinden sonra, gerçek veriyle).
 
 ## Kaynaklar
 
