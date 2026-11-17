@@ -9,6 +9,13 @@
   --color-accent: #e8664a;
   --color-success: #2f9e6b;
   --color-warn: #b26a00;
+  --color-danger: #c03a2b;
+  /* Live output panel: dark background (design: "Canlı çıktı koyu zeminli"). */
+  --color-console: #1b1f29;
+  --color-console-ink: #e7e4dd;
+  --color-console-muted: #9aa0ad;
+  --color-console-danger: #ff8a7a;
+  --color-console-success: #6fd3a0;
 
   --font-sans: 'Nunito Variable', 'Nunito', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, monospace;
