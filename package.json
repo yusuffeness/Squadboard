@@ -1,0 +1,33 @@
+{
+  "name": "squadboard",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Local web UI that plans work and runs Claude Code agents on separate git branches, with you approving every step.",
+  "license": "MIT",
+  "type": "module",
+  "packageManager": "pnpm@10.34.9",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @squadboard/core build && pnpm --parallel --recursive run dev",
+    "build": "pnpm --recursive run build",
+    "test": "pnpm --recursive run test",
+    "typecheck": "pnpm --recursive run typecheck",
+    "lint": "eslint . && prettier --check .",
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.6.6",
+    "eslint": "^10.15.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.8",
+    "globals": "^17.14.0",
+    "prettier": "^3.10.1",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.73.0",
+    "vitest": "^5.1.0"
+  }
+}
