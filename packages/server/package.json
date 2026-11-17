@@ -7,20 +7,22 @@
   "type": "module",
   "main": "./dist/index.js",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx watch src/dev.ts",
     "build": "tsc -p tsconfig.build.json",
-    "start": "node dist/index.js",
+    "start": "node bin/squadboard.js",
     "typecheck": "pnpm --filter @squadboard/core build && tsc --noEmit",
     "test": "pnpm --filter @squadboard/core build && vitest run",
     "db:generate": "drizzle-kit generate",
     "try": "pnpm --filter @squadboard/core build && tsx scripts/try-runner.ts"
   },
   "dependencies": {
+    "@fastify/static": "^10.1.11",
     "@squadboard/core": "workspace:*",
     "better-sqlite3": "^13.2.0",
     "drizzle-orm": "^0.45.4",
     "execa": "^10.2.1",
-    "fastify": "^5.12.8"
+    "fastify": "^5.12.8",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
@@ -28,7 +30,11 @@
     "tsx": "^4.23.15"
   },
   "files": [
+    "bin",
     "dist",
     "drizzle"
-  ]
+  ],
+  "bin": {
+    "squadboard": "./bin/squadboard.js"
+  }
 }

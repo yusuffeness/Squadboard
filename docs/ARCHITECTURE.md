@@ -86,6 +86,7 @@ squadboard/
                # test/fixtures/claude-cli: gerçek CLI kayıtları (adaptör testleri kullanır)
     server/    # Fastify, orkestratör, runner, git, SQLite
                # drizzle/: SQL migration'ları; test/fake-claude.mjs: kayıtları oynatan sahte CLI
+               # bin/squadboard.js → src/cli.ts: `squadboard` komutu; src/dev.ts: `pnpm dev` girişi
     web/       # React arayüzü (Vite)
     spike/     # Aşama 1 keşif kodu, ürün kodu değil (silinebilir)
   templates/   # hazır ekip şablonları (fullstack, api, fix)
@@ -176,13 +177,27 @@ claude -p "$GÖREV_METNİ" \
 
 `resume()` işin son oturumunu, o oturumun kaydedildiği klasörden `--resume` ile sürdürür; başka bir klasör verilirse süreci başlatmadan hata verir. Testler gerçek CLI yerine `packages/server/test/fake-claude.mjs` ile çalışır: Aşama 1 kayıtlarını oynatır, `--verbose` ve klasöre bağlı oturum davranışını taklit eder, durdurma testi için torun süreç başlatabilir. CI'da gerçek `claude` gerekmez.
 
+**HTTP API** (`packages/server/src/routes/runs.ts`, Aşama 4). Hepsi anahtar ister (yukarıdaki Güvenlik bölümü).
+
+| Uç nokta | Ne yapar |
+| --- | --- |
+| `POST /api/runs` | `{ prompt, cwd, model?, maxBudgetUsd? }`. `cwd` mutlak yol ve var olan bir klasör olmalı. Proje (yola göre), istek ve iş kaydı oluşturur, runner'ı başlatır, 201 ile run özetini döner. |
+| `GET /api/runs` | Son 50 run: istek metni, klasör, durum, iş durumu, maliyet, tur, süre, `active`. |
+| `GET /api/runs/:id` | Tek run özeti. |
+| `POST /api/runs/:id/stop` | Süreç ağacını öldürür, güncel özeti döner (bitmiş run'da etkisizdir). |
+| `GET /api/runs/:id/events` | SSE. Önce kayıtlı olaylar `seq` sırasıyla (`event: agent`, `id: <seq>`), sonra canlı olanlar, en sonda `event: end` ile run özeti; ardından bağlantı kapanır. `Last-Event-ID` ya da `?after=` ile kalınan yerden devam eder. 15 sn'de bir yorum satırı (`: ping`) bağlantıyı canlı tutar. |
+
+Geçmişi oynatma ile canlı dinlemeye geçiş aynı senkron adımda yapılır: `better-sqlite3` senkron çalışır ve runner her olayı yayınlamadan önce veritabanına yazar; bu yüzden aradaki bir olay kaybolamaz ya da iki kez gönderilemez.
+
+Prototip ajanı (`PROTOTYPE_AGENT`): `acceptEdits`, araçlar `Read, Edit, Write, Glob, Grep` (kabuk komutu yok), bütçe $1. Gerçek ajanlar ve araç listeleri ileride `.team/` şablonlarından gelecek.
+
 **Oturum ve süreç.**
 
 - Oturumlar `~/.claude/projects/<klasör>/` altında, **çalışma klasörüne bağlı** tutulur. Bir işin oturumu yalnızca kendi worktree yolundan `--resume` edilebilir; bu yüzden worktree yolu `runs` tablosunda saklanır ve iş kapanmadan worktree silinmez.
 - Durdurma: Windows'ta `child.kill()` yalnızca `claude.exe`'yi öldürür, ajanın başlattığı bash ve node süreçleri yetim kalır. Süreç ağacı Windows'ta `taskkill /PID <pid> /T /F` ile, POSIX'te süreç grubu (`detached` + `process.kill(-pid)`) ile sonlandırılır. Öldürülen koşuda `result` olayı gelmez; runner bunu `stopped` sayar. Öldürülen oturum sonradan `--resume` ile sürdürülebilir.
 - Windows'ta npm'in `claude.cmd` dosyası yalnızca `bin/claude.exe`'ye yönlendirir; `.exe` doğrudan çalıştırılır (`shell: true` argüman tırnaklamasını bozar).
 - Sunucu bir Claude Code oturumunun içinden başlatılırsa `CLAUDECODE`, `CLAUDE_CODE_SESSION_ID` gibi oturum değişkenleri alt süreçlere geçer; runner bunları temizleyerek başlatır. Temizlik açık bir yasak listesiyle yapılır (`claude-cli.ts`), çünkü `CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_USE_BEDROCK`, `ANTHROPIC_API_KEY` gibi kullanıcı ayarları korunmalıdır.
-- POSIX'te süreç `detached` başlatıldığı için Squadboard çökerse ajan süreçleri kendiliğinden ölmez; sunucu kapanırken `runner.stopAll()` çağrılmalıdır (Aşama 4).
+- POSIX'te süreç `detached` başlatıldığı için Squadboard kapanırsa ajan süreçleri kendiliğinden ölmez. Bu yüzden sunucu `SIGINT`, `SIGTERM`, `SIGHUP` (Windows'ta ayrıca `SIGBREAK`; Windows'ta Ctrl+C `SIGINT` olarak gelir) aldığında önce `runner.stopAll()` ile tüm süreç ağaçlarını öldürür, sonra HTTP sunucusunu ve veritabanını kapatır (`packages/server/src/shutdown.ts`). İkinci sinyal hemen çıkar. Sunucu zorla öldürülürse (`kill -9`, Görev Yöneticisi) bu çalışmaz; açılışta yetim run'ları `stopped` yapmak sonraki bir aşamanın işi.
 - `-p` modunda kullanıcının global ayarları, skill'leri ve hafızası yüklenir; ajan davranışı kullanıcıdan kullanıcıya değişebilir. `--strict-mcp-config` MCP sunucularını kapatır; `--setting-sources` ileride değerlendirilir (`--bare` abonelikle çalışmaz).
 
 **Worktree.** Claude Code'un kendi [`--worktree`/`-w` bayrağı](https://claudefa.st/blog/guide/development/worktree-guide) `.claude/worktrees/<ad>/` altında çalışma dizini açıyor ve değişiklik yoksa temizliyor. Biz ilk sürümde worktree'yi kendimiz `git worktree add` ile açıyoruz: dal adını (`team/auth-api`) ve bir önceki işin dalından başlatmayı biz belirlemek istiyoruz. Bu bir tasarım tercihi; `-w` daha az kod demek, ikisi de denenebilir.
@@ -296,7 +311,12 @@ Sunucu başlangıcında çalışıyor görünen ama süreci ölen işleri `stopp
 
 Uygulama bilgisayarında kod çalıştıran ajanları yönetiyor; bu yüzden varsayılanlar kapalı taraftadır.
 
-- **Yerel sunucu.** Yalnızca `127.0.0.1`'e bağlanır. Her başlatışta rastgele bir oturum anahtarı üretilir; arayüz anahtarla açılır, API çağrılarında `Origin` ve `Host` başlıkları denetlenir. Böylece başka bir web sitesi yerel sunucuya komut gönderemez.
+- **Yerel sunucu.** Yalnızca `127.0.0.1`'e bağlanır. Her başlatışta rastgele bir oturum anahtarı (32 bayt, base64url) üretilir. Her istek sırayla üç denetimden geçer (`packages/server/src/security.ts`):
+  1. **Host:** hostname `127.0.0.1`, `localhost` ya da `[::1]` olmalı, yoksa 403. DNS rebinding'i engeller: `evil.com` 127.0.0.1'e çözülse bile tarayıcı `Host: evil.com` gönderir.
+  2. **Origin:** varsa, izinli listedeki bir değerle **port dahil** birebir eşleşmeli, yoksa 403. Böylece başka siteler, localhost'ta başka bir portta çalışan uygulamalar da dahil, API'yi çağıramaz. İzinli liste sunucunun kendi adresidir; geliştirmede Vite'ın adresi (`127.0.0.1:5173`) eklenir.
+  3. **Anahtar:** `/api` altındaki her istek anahtar ister, yoksa ya da yanlışsa 401. `Authorization: Bearer` ile gönderilir; `EventSource` başlık gönderemediği için yalnızca GET isteklerinde `?token=` de kabul edilir. Karşılaştırma sabit sürelidir; anahtar loglara yazılmaz.
+
+  `squadboard` komutu adresi `http://127.0.0.1:4317/#token=…` olarak yazar ve tarayıcıyı açar. Anahtar URL'nin **fragment** kısmındadır: sunucuya, loglara ve Referer başlığına gitmez. Sayfa onu yalnızca bellekte tutar (localStorage'a yazmaz); adres çubuğunda kaldığı için sayfa yenilenince çalışmaya devam eder. Sayfanın kendisi (statik dosyalar) anahtarsız sunulur, içinde gizli bilgi yoktur.
 - **Ajan sınırları.** Her ajan yalnızca kendi worktree klasöründe ve kendi araç beyaz listesiyle çalışır. Her yetkiyi atlayan bayrak (`--dangerously-skip-permissions`) kullanılmaz.
 - **Gizli dosyalar.** `.env` ve anahtar dosyalarının okunmasını yasaklayan izin kuralları şablonla gelir. Kural söz dizimi hedef Claude Code sürümünde doğrulanmalıdır.
 - **Sınırlar.** `--max-budget-usd` (asıl sınır; `--max-turns` belgelenmemiş olduğu için yalnızca ek önlem), iş başına zaman aşımı ve eşzamanlılık üst sınırı (varsayılan 3). Durdurma basılınca süreç ağacının tamamı sonlandırılır (Windows'ta `taskkill /T /F`); yalnızca `claude` sürecini öldürmek ajanın başlattığı komutları yetim bırakır.
@@ -335,8 +355,8 @@ Numaralar "Aşama Planı ve Promptlar" belgesindeki aşamalarla aynıdır.
 | 0. İskelet | pnpm monorepo, TypeScript strict, ESLint/Prettier/Vitest, boş web sayfası, `GET /health`, CI (Linux + Windows) | `pnpm dev` ile web ve server kalkıyor; lint, test, build ve CI yeşil | ✅ |
 | 1. CLI keşfi | `claude -p` biçimleri, `--resume`, izinler, `--json-schema`, KARAR ölçümü, süreç sonlandırma; gerçek çıktılar kaydedildi | [claude-cli-notes.md](claude-cli-notes.md) yazıldı, KARAR güvenilirliği sayısal | ✅ |
 | 2. Core | Zod şemaları ve tipler, iş durum makinesi, stream-json adaptörü, KARAR ayrıştırıcı, plan doğrulama ve sıralama | Kayıtlı CLI çıktıları adaptörden hatasız geçiyor; geçersiz geçiş ve plan döngüsü testlerle yakalanıyor | ✅ |
-| 3. Runner ve SQLite | SQLite + Drizzle (7 tablo, ilk migration), `claude -p` sürecini başlatma ve süreç ağacıyla sonlandırma, `--session-id` / `--resume`, `permission_denials` ve stderr hatalarını işleme, ortam temizliği, sahte CLI ile testler | Sahte CLI ile başlat, akış, durdur ve sürdür testleri Windows ve Linux'ta yeşil; olaylar DB'ye sırayla yazılıyor; durdurma sonrası artık süreç kalmıyor | ✅ Windows; Linux CI'da doğrulanacak |
-| 4. Prototip | Tek iş, `stream-json` olayları canlı ekranda (SSE) | Arayüzden verilen bir istek canlı çıktıyla bitiyor; kredi ve Anthropic sorusu gerçek veriyle değerlendiriliyor | |
+| 3. Runner ve SQLite | SQLite + Drizzle (7 tablo, ilk migration), `claude -p` sürecini başlatma ve süreç ağacıyla sonlandırma, `--session-id` / `--resume`, `permission_denials` ve stderr hatalarını işleme, ortam temizliği, sahte CLI ile testler | Sahte CLI ile başlat, akış, durdur ve sürdür testleri Windows ve Linux'ta yeşil; olaylar DB'ye sırayla yazılıyor; durdurma sonrası artık süreç kalmıyor | ✅ (Windows ve Linux CI) |
+| 4. Server, SSE ve prototip arayüz | Anahtar + Host/Origin denetimi, run API'si, SSE canlı akış, tek sayfalık arayüz, `squadboard` komutu, kapanışta `stopAll()` | Tarayıcıda prompt yazıp gerçek `claude` çıktısı canlı izleniyor; Durdur süreci öldürüyor; anahtarsız ya da yanlış Origin'li istek reddediliyor; yenileyince geçmiş run'lar görünüyor | Kod ✅; elle deneme ve karar noktası (kredi, KARAR) bekliyor |
 | 5. Pano ve worktree | SQLite, işler ve durumlar, worktree ve dal açma, Pano ekranı, durdur ve sürdür | İki iş paralel, farklı dallarda çalışıp biri birleştirilebiliyor | |
 | 6. Planner ve zamanlayıcı | Planner (`--json-schema`, `openDecisions`), Plan onayı ekranı, bağımlılık ve çakışma kontrolü, KARAR yedek akışı, izin kartı | Tek istekten 4-5 iş sırayla ve paralel çalışıyor; plan kararları onayda cevaplanıyor | |
 | 7. Reviewer ve cilalama | Reviewer şeması, İnceleme ekranı, test komutu, isim modları, Ekibini kur ekranı | Tasarım taslaklarındaki dört ekranın tam akışı çalışıyor | |

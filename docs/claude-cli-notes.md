@@ -228,3 +228,12 @@ Notlar:
 - Spike'taki ortam temizliği bütün `CLAUDE*` değişkenlerini siliyordu; runner'da bu, kullanıcının kendi ayarlarını da sileceği için açık bir yasak listesine çevrildi.
 - Durdurma testinin gerçekten yetim süreci yakaladığı doğrulandı: `taskkill /T` geçici olarak düz `process.kill` ile değiştirilince test kırmızıya döndü (yetim torun süreç yüzünden zaman aşımı).
 - Gerçek CLI ile uçtan uca deneme için: `pnpm --filter @squadboard/server try` (haiku, salt okunur araçlar, $0.25 bütçe sınırı, geçici bir klasörde).
+
+## 12. Sunucu ve arayüz tarafı (Aşama 4)
+
+CLI davranışıyla ilgili olarak bu aşamada eklenenler:
+
+- **Kapanışta yetim süreç kalmıyor.** POSIX'te ajanlar `detached` başlatıldığı için sunucuyla birlikte ölmezler (§6, §11). Sunucu `SIGINT` / `SIGTERM` / `SIGHUP` (Windows'ta ayrıca `SIGBREAK`) alınca önce `runner.stopAll()` çağırıyor. Windows'ta Ctrl+C Node'a `SIGINT` olarak geliyor. Testte (`server.test.ts`) torun süreçli bir run açıkken `close()` çağrılıyor ve iki sürecin de öldüğü doğrulanıyor. Sunucu zorla öldürülürse bu çalışmaz.
+- **Canlı akış blok düzeyinde.** Arayüz `--include-partial-messages` kullanmıyor; §1'deki gibi her içerik bloğu (düşünce, araç çağrısı, metin) ayrı bir satır olarak ve ~0.1–1 sn aralıklarla geliyor. Prototip için yeterli.
+- **İzin reddi görünür.** `result.permission_denials` (§3) canlı panelde "İzin verilmedi: …" satırı olarak gösteriliyor; iş `waiting_decision` oluyor. İzin verme akışı sonraki bir aşamada.
+- **Prototip ajanı kabuk komutu çalıştıramaz** (`Read, Edit, Write, Glob, Grep`, `acceptEdits`, $1 bütçe). "Testleri çalıştır" gibi istekler bu yüzden izin reddine düşer; beklenen davranış.

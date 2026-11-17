@@ -15,7 +15,8 @@
     "test": "pnpm --recursive run test",
     "typecheck": "pnpm --recursive run typecheck",
     "lint": "eslint . && prettier --check .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "start": "pnpm build && node packages/server/bin/squadboard.js"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

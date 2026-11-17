@@ -5,5 +5,5 @@
     "moduleResolution": "NodeNext",
     "types": ["node"]
   },
-  "include": ["src", "scripts"]
+  "include": ["src", "scripts", "test"]
 }
