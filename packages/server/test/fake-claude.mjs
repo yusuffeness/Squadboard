@@ -13,10 +13,12 @@
 //   FAKE_CLAUDE_ARGS_FILE  write the received argv here as JSON
 //   FAKE_CLAUDE_HANG       "1": after replaying, start a grandchild process and never exit
 //   FAKE_CLAUDE_PIDS_FILE  with HANG: write {"self": pid, "grandchild": pid} here
+//   FAKE_CLAUDE_WRITE      JSON {"relative/path": "content"}: files to write in the cwd, like
+//                          an agent's edits (written before the replay starts)
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 const argv = process.argv.slice(2);
 const flag = (name) => {
@@ -67,6 +69,14 @@ const lines = readFileSync(fixture, 'utf8')
   .split(/\r?\n/)
   .filter((l) => l.trim() !== '')
   .map((l) => l.replace(/"session_id":"[0-9a-f-]{36}"/g, `"session_id":"${sessionId}"`));
+
+if (env.FAKE_CLAUDE_WRITE) {
+  for (const [file, content] of Object.entries(JSON.parse(env.FAKE_CLAUDE_WRITE))) {
+    const target = join(process.cwd(), file);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, content);
+  }
+}
 
 const delay = Number(env.FAKE_CLAUDE_DELAY_MS ?? 2);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

@@ -284,3 +284,56 @@ export function listEventsAfter(
     .orderBy(asc(events.seq))
     .all() as (EventRow & { data: AgentEvent })[];
 }
+
+export function getProject(db: Db, id: string): ProjectRow | undefined {
+  return db.select().from(projects).where(eq(projects.id, id)).get();
+}
+
+export function listProjects(db: Db): ProjectRow[] {
+  return db.select().from(projects).orderBy(asc(projects.createdAt)).all();
+}
+
+export function updateTask(
+  db: Db,
+  id: string,
+  patch: Partial<Omit<TaskRow, 'id' | 'requestId' | 'status' | 'createdAt'>>,
+): TaskRow {
+  return db.update(tasks).set(patch).where(eq(tasks.id, id)).returning().get();
+}
+
+/** A task with its prompt and project (tasks belong to a project through their request). */
+export interface TaskWithContext {
+  task: TaskRow;
+  prompt: string;
+  projectId: string;
+}
+
+export function getTaskWithContext(db: Db, id: string): TaskWithContext | undefined {
+  return db
+    .select({ task: tasks, prompt: requests.text, projectId: requests.projectId })
+    .from(tasks)
+    .innerJoin(requests, eq(tasks.requestId, requests.id))
+    .where(eq(tasks.id, id))
+    .get();
+}
+
+export function listProjectTasks(db: Db, projectId: string): TaskWithContext[] {
+  return db
+    .select({ task: tasks, prompt: requests.text, projectId: requests.projectId })
+    .from(tasks)
+    .innerJoin(requests, eq(tasks.requestId, requests.id))
+    .where(eq(requests.projectId, projectId))
+    .orderBy(asc(tasks.createdAt))
+    .all();
+}
+
+/** Tasks that list `taskId` in their dependsOn. */
+export function listDependents(db: Db, projectId: string, taskId: string): TaskRow[] {
+  return listProjectTasks(db, projectId)
+    .map((t) => t.task)
+    .filter((t) => t.dependsOn.includes(taskId));
+}
+
+export function latestRunSummary(db: Db, taskId: string): RunSummary | undefined {
+  return runSummaryQuery(db).where(eq(runs.taskId, taskId)).orderBy(desc(runs.startedAt)).get();
+}

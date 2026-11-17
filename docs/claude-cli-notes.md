@@ -237,3 +237,15 @@ CLI davranışıyla ilgili olarak bu aşamada eklenenler:
 - **Canlı akış blok düzeyinde.** Arayüz `--include-partial-messages` kullanmıyor; §1'deki gibi her içerik bloğu (düşünce, araç çağrısı, metin) ayrı bir satır olarak ve ~0.1–1 sn aralıklarla geliyor. Prototip için yeterli.
 - **İzin reddi görünür.** `result.permission_denials` (§3) canlı panelde "İzin verilmedi: …" satırı olarak gösteriliyor; iş `waiting_decision` oluyor. İzin verme akışı sonraki bir aşamada.
 - **Prototip ajanı kabuk komutu çalıştıramaz** (`Read, Edit, Write, Glob, Grep`, `acceptEdits`, $1 bütçe). "Testleri çalıştır" gibi istekler bu yüzden izin reddine düşer; beklenen davranış.
+
+## 13. Worktree içinde çalıştırma (Aşama 5)
+
+- Her görev `claude -p`'yi kendi worktree'sinde (`~/.squadboard/worktrees/<proje>/<dal>`) başlatır. Worktree normal bir git çalışma ağacı olduğu için reponun `CLAUDE.md`'si ve `.claude/` ayarları orada da vardır ve yüklenir.
+- Oturum kimliği worktree yoluna bağlıdır (§2). Temizlenen bir görev yeniden başlatılınca worktree **aynı yolda** yeniden açılır, böylece önceki oturum yine sürdürülebilir.
+- Ajan commit atmaz (kabuk aracı yok); Squadboard run `in_review` ile bitince değişiklikleri görevin `team/` dalına kendisi commit'ler. Bağımlı görev bu commit'ten başlar.
+- Gerçek `claude` ile worktree içinde çalıştırma bu aşamanın elle denemesinde doğrulanacak; otomatik testler sahte CLI ile (§11) ve gerçek git repolarıyla çalışıyor.
+
+### Aşama 5 elle denemesinden iki bulgu (gerçek `claude`)
+
+- ⚠️ **`--allowedTools` bir beyaz liste değil.** Yalnızca `--allowedTools Read,Edit,Write,Glob,Grep` verilen bir ajan Bash ile `ls` çalıştırabildi; reddedilmedi (`permission_denials` boş). Listede olmayan araçlar kullanılabilir kalıyor ve Claude Code salt okunur kabuk komutlarını kendiliğinden onaylıyor. Kullanılabilir araç kümesini gerçekten daraltan flag **`--tools`**. Varsayılan ajan artık ikisini birlikte veriyor (`DEFAULT_AGENT_OPTIONS`, testi var).
+- ⚠️ **Ajan `AskUserQuestion` ile soru sormaya çalışıyor.** "README'ye bir satır ekle" isteğinde ajan hangi satırı ekleyeceğini sordu; başsız modda araç reddedildi, ajan bir varsayılan seçip işi bitirdi. Runner reddi gördüğü için görev `waiting_decision` oldu ve iş commit'lenmedi. `--tools` ile bu araç artık hiç sunulmuyor. Açık soru: ajanın soruları KARAR akışına (Aşama 6) bağlanmalı mı? `AskUserQuestion` girdisi zaten soru + seçenekler biçiminde.

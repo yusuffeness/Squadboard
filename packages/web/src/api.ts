@@ -27,6 +27,46 @@ export interface RunView {
   active: boolean;
 }
 
+/** Mirrors ProjectView in packages/server/src/routes/projects.ts. */
+export interface ProjectView {
+  id: string;
+  path: string;
+  mainBranch: string;
+  /** false: the user has uncommitted changes, which agents do not see. */
+  clean: boolean | null;
+  taskCount: number;
+  createdAt: string;
+}
+
+/** Mirrors TaskView in packages/server/src/routes/projects.ts. */
+export interface TaskView {
+  id: string;
+  projectId: string;
+  title: string;
+  prompt: string;
+  agent: string;
+  status: TaskStatus;
+  dependsOn: string[];
+  expectedFiles: string[];
+  branch: string | null;
+  worktreePath: string | null;
+  baseRef: string | null;
+  changedFiles: string[];
+  unexpectedFiles: string[];
+  gitError: string | null;
+  createdAt: string;
+  active: boolean;
+  latestRun: RunView | null;
+}
+
+export interface NewTask {
+  title: string;
+  prompt: string;
+  agent: string;
+  expectedFiles: string[];
+  dependsOn: string | null;
+}
+
 export interface StreamedEvent {
   seq: number;
   event: AgentEvent;
@@ -56,9 +96,19 @@ export function createApi(token: string) {
   }
 
   return {
-    listRuns: () => request<{ runs: RunView[] }>('GET', '/api/runs').then((r) => r.runs),
-    createRun: (input: { prompt: string; cwd: string }) =>
-      request<RunView>('POST', '/api/runs', input),
+    listProjects: () =>
+      request<{ projects: ProjectView[] }>('GET', '/api/projects').then((r) => r.projects),
+    addProject: (path: string) => request<ProjectView>('POST', '/api/projects', { path }),
+    listTasks: (projectId: string) =>
+      request<{ tasks: TaskView[] }>('GET', `/api/projects/${projectId}/tasks`).then(
+        (r) => r.tasks,
+      ),
+    createTask: (projectId: string, task: NewTask) =>
+      request<TaskView>('POST', `/api/projects/${projectId}/tasks`, task),
+    startTask: (id: string) => request<TaskView>('POST', `/api/tasks/${id}/start`),
+    stopTask: (id: string) => request<TaskView>('POST', `/api/tasks/${id}/stop`),
+    cleanupTask: (id: string, deleteBranch: boolean) =>
+      request<TaskView>('POST', `/api/tasks/${id}/cleanup`, { deleteBranch }),
     stopRun: (id: string) => request<RunView>('POST', `/api/runs/${id}/stop`),
     /** EventSource cannot send headers, so the token goes in the query (GET only on the server). */
     eventsUrl: (id: string) => `/api/runs/${id}/events?token=${encodeURIComponent(token)}`,

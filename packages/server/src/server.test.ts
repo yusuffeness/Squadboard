@@ -1,5 +1,7 @@
 import { rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { initRepo } from '../test/git-repo.js';
 import {
   fakeClaude,
   fakeEnv,
@@ -10,6 +12,7 @@ import {
   waitForPids,
   type TempWorkspace,
 } from '../test/helpers.js';
+import type { ProjectView, TaskView } from './routes/projects.js';
 import type { RunView } from './routes/runs.js';
 import { isProcessAlive } from './runner/kill-tree.js';
 import { startServer, type RunningServer } from './server.js';
@@ -24,18 +27,37 @@ afterEach(async () => {
 });
 
 async function start(env: NodeJS.ProcessEnv): Promise<RunningServer> {
-  server = await startServer({ port: 0, dbPath: ws.dbPath, claude: fakeClaude, env });
+  initRepo(ws.cwd);
+  server = await startServer({
+    port: 0,
+    dbPath: ws.dbPath,
+    worktreesDir: join(ws.dir, 'worktrees'),
+    claude: fakeClaude,
+    env,
+  });
   return server;
 }
 
-async function postRun(s: RunningServer): Promise<RunView> {
-  const res = await fetch(`http://127.0.0.1:${s.port}/api/runs`, {
+async function post<T>(s: RunningServer, path: string, body: object = {}): Promise<T> {
+  const res = await fetch(`http://127.0.0.1:${s.port}${path}`, {
     method: 'POST',
     headers: { authorization: `Bearer ${s.token}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ prompt: 'Add a line to README', cwd: ws.cwd }),
+    body: JSON.stringify(body),
   });
-  expect(res.status).toBe(201);
-  return (await res.json()) as RunView;
+  expect(res.status, path).toBeLessThan(300);
+  return (await res.json()) as T;
+}
+
+/** Project → task → start, the way the UI does it. Returns the run that was started. */
+async function postRun(s: RunningServer): Promise<RunView> {
+  const project = await post<ProjectView>(s, '/api/projects', { path: ws.cwd });
+  const task = await post<TaskView>(s, `/api/projects/${project.id}/tasks`, {
+    title: 'Add a line to README',
+    prompt: 'Add a line to README',
+  });
+  const started = await post<TaskView>(s, `/api/tasks/${task.id}/start`);
+  if (!started.latestRun) throw new Error('no run');
+  return started.latestRun;
 }
 
 describe('startServer', () => {

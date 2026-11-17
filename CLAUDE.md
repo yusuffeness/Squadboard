@@ -20,6 +20,7 @@ Teknik tasarım: `docs/ARCHITECTURE.md`. Her işe onu okuyarak başla.
 - Kod, yorum ve tanımlayıcılar İngilizce.
 - Sunucu yalnızca `127.0.0.1`'e bağlanır. `--dangerously-skip-permissions` asla kullanılmaz.
 - Yeni `/api` uç noktaları `security.ts` hook'unun arkasında kalır (Host, Origin, token); güvenliği atlayan bir yol açma, token'ı loglama.
+- Kullanıcının reposunda çalışma ağacına ve ana dalına asla dokunulmaz: ajanlar yalnızca `~/.squadboard/worktrees/` altındaki worktree'lerde çalışır; git servisi yalnızca `team/` dallarında oluşturur, commit'ler, siler. Git testleri her senaryodan sonra kullanıcı reposunun değişmediğini doğrular; yeni git kodu da bunu yapmalı.
 - web, core'dan yalnızca `import type` ile tip alır (`tsconfig` `paths` → `core/src`); çalışma zamanında core'a bağlı değildir.
 - Renk ve font için Tailwind token'larını kullan (`bg-bg`, `text-ink`, `text-accent`, `text-success`, `text-warn`, `font-sans`, `font-mono`); ham hex yazma. Token'lar `packages/web/src/index.css` içindeki `@theme` bloğunda.
 
@@ -50,3 +51,4 @@ Teknik tasarım: `docs/ARCHITECTURE.md`. Her işe onu okuyarak başla.
 - server, core'u derlenmiş `dist` üzerinden kullanır; server'ın `test` ve `typecheck` script'leri önce core'u build eder.
 - `better-sqlite3` hazır binary'lerle gelir. `onlyBuiltDependencies`'e **ekleme**: pnpm o zaman `node-gyp` çalıştırır ve C++ derleyicisi olmayan makinede kurulum kırılır.
 - Runner testleri gerçek CLI yerine `packages/server/test/fake-claude.mjs` kullanır; CLI'ın gerçek davranışı değişirse önce Aşama 1 kayıtlarını (`packages/core/test/fixtures/claude-cli/`) yenile.
+- Testlerde geçici klasörü `realpathSync.native(mkdtempSync(...))` ile aç: Windows CI'da `tmpdir()` 8.3 kısa yol döner (`RUNNER~1`), git ise uzun yolu raporlar; yol karşılaştıran testler yalnızca CI'da kırılır. Yerelde denemek için `TEMP`'i kısa bir yola çevirip testleri çalıştır.
