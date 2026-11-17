@@ -1,37 +1,17 @@
 import type { FastifyInstance } from 'fastify';
-import { statSync } from 'node:fs';
-import { isAbsolute, resolve } from 'node:path';
 import { z } from 'zod';
 import type { Db } from '../db/index.js';
 import {
-  createProject,
-  createRequest,
-  createTask,
-  findProjectByPath,
   getRunSummary,
   listEventsAfter,
   listRunSummaries,
   type RunSummary,
 } from '../db/repository.js';
-import type { AgentRunOptions } from '../runner/claude-cli.js';
 import type { RunOutcome, Runner } from '../runner/runner.js';
 
-/**
- * Prototype defaults (Stage 4): a general agent that may read and edit files but not run shell
- * commands. Real agents and their tool lists come from `.team/` templates later.
- */
-export const PROTOTYPE_AGENT: AgentRunOptions = {
-  permissionMode: 'acceptEdits',
-  allowedTools: ['Read', 'Edit', 'Write', 'Glob', 'Grep'],
-  maxBudgetUsd: 1,
-};
-
-const CreateRunBody = z.object({
-  prompt: z.string().trim().min(1, 'prompt is required').max(20_000),
-  cwd: z.string().trim().min(1, 'cwd is required'),
-  model: z.string().trim().min(1).optional(),
-  maxBudgetUsd: z.number().positive().max(50).optional(),
-});
+// Runs are started through tasks (routes/projects.ts), always in the task's own worktree.
+// Starting an agent directly in a user folder (Stage 4's POST /api/runs) was removed in Stage 5:
+// it edited the user's working tree.
 
 const RunParams = z.object({ id: z.string().min(1) });
 
@@ -54,36 +34,6 @@ export function registerRunRoutes(app: FastifyInstance, deps: { db: Db; runner: 
     const summary = getRunSummary(db, id);
     if (!summary) return reply.code(404).send({ error: 'Run not found' });
     return view(summary);
-  });
-
-  app.post('/api/runs', async (request, reply) => {
-    const parsed = CreateRunBody.safeParse(request.body);
-    if (!parsed.success) {
-      return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? 'Invalid body' });
-    }
-    const { prompt, model, maxBudgetUsd } = parsed.data;
-    if (!isAbsolute(parsed.data.cwd)) {
-      return reply.code(400).send({ error: 'cwd must be an absolute path' });
-    }
-    const cwd = resolve(parsed.data.cwd);
-    if (!isDirectory(cwd)) return reply.code(400).send({ error: `Not a directory: ${cwd}` });
-
-    const project = findProjectByPath(db, cwd) ?? createProject(db, { path: cwd });
-    const req = createRequest(db, { projectId: project.id, text: prompt });
-    const task = createTask(db, {
-      requestId: req.id,
-      title: prompt.slice(0, 80),
-      agent: 'prototype',
-      worktreePath: cwd,
-    });
-    const options: AgentRunOptions = { ...PROTOTYPE_AGENT };
-    if (model) options.model = model;
-    if (maxBudgetUsd !== undefined) options.maxBudgetUsd = maxBudgetUsd;
-
-    const handle = runner.start({ taskId: task.id, prompt, cwd, ...options });
-    const summary = getRunSummary(db, handle.runId);
-    if (!summary) throw new Error('Run was not stored');
-    return reply.code(201).send(view(summary));
   });
 
   app.post('/api/runs/:id/stop', async (request, reply) => {
@@ -169,12 +119,4 @@ export function registerRunRoutes(app: FastifyInstance, deps: { db: Db; runner: 
 
     request.raw.on('close', cleanup);
   });
-}
-
-function isDirectory(path: string): boolean {
-  try {
-    return statSync(path).isDirectory();
-  } catch {
-    return false;
-  }
 }

@@ -183,6 +183,11 @@ export class Runner extends EventEmitter<RunnerEventMap> {
     return this.active.has(runId);
   }
 
+  isTaskRunning(taskId: string): boolean {
+    for (const run of this.active.values()) if (run.taskId === taskId) return true;
+    return false;
+  }
+
   // ---------- internals ----------
 
   private requireTransition(taskId: string): void {

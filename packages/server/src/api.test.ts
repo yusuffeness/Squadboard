@@ -1,78 +1,109 @@
 import type { FastifyInstance } from 'fastify';
-import { rmSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import {
-  fakeClaude,
-  fakeEnv,
-  hangingEnv,
-  makeWorkspace,
-  parseSse,
-  waitFor,
-  waitForPids,
-  type TempWorkspace,
-} from '../test/helpers.js';
+import { makeTestRepo, snapshotUserRepo, type TestRepo } from '../test/git-repo.js';
+import { fakeClaude, FIXTURES, parseSse, waitFor } from '../test/helpers.js';
 import { buildApp } from './app.js';
 import { openDatabase, type DbHandle } from './db/index.js';
+import type { ProjectView, TaskView } from './routes/projects.js';
 import type { RunView } from './routes/runs.js';
 import { isProcessAlive } from './runner/kill-tree.js';
 import { Runner } from './runner/runner.js';
+import { TaskService } from './tasks/task-service.js';
 
 const TOKEN = 'test-token-0123456789';
 const ORIGIN = 'http://127.0.0.1:4317';
 const auth = { authorization: `Bearer ${TOKEN}` };
 
-let ws: TempWorkspace;
+let t: TestRepo | undefined;
 let db: DbHandle;
 let runner: Runner;
+let tasks: TaskService;
 let app: FastifyInstance;
+let before: ReturnType<typeof snapshotUserRepo>;
 
-function setup(env: NodeJS.ProcessEnv) {
-  ws ??= makeWorkspace();
-  db = openDatabase(ws.dbPath);
+function setup(fake: { fixture?: string; hang?: boolean; write?: Record<string, string> } = {}) {
+  t = makeTestRepo();
+  before = snapshotUserRepo(t.repo);
+  db = openDatabase(join(t.dir, 'test.db'));
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    FAKE_CLAUDE_FIXTURE: join(FIXTURES, fake.fixture ?? '03-stream-verbose.jsonl'),
+    FAKE_CLAUDE_HOME: join(t.dir, 'fake-home'),
+  };
+  if (fake.write) env.FAKE_CLAUDE_WRITE = JSON.stringify(fake.write);
+  if (fake.hang) {
+    env.FAKE_CLAUDE_HANG = '1';
+    env.FAKE_CLAUDE_PIDS_FILE = join(t.dir, 'pids.json');
+  }
   runner = new Runner({ db: db.db, claude: fakeClaude, env, stopGraceMs: 500 });
+  tasks = new TaskService({ db: db.db, runner, worktreesDir: t.worktrees });
   app = buildApp({
     db: db.db,
     runner,
+    tasks,
     token: TOKEN,
     allowedOrigins: new Set([ORIGIN, 'http://localhost:4317']),
   });
-}
-
-function setupWith(fixture: string, extra: Record<string, string> = {}) {
-  ws = makeWorkspace();
-  setup(fakeEnv(ws, fixture, extra));
+  return t;
 }
 
 afterEach(async () => {
+  if (!t) return;
   await runner.stopAll();
+  await tasks.drain();
   await app.close();
   db.close();
-  rmSync(ws.dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  ws = undefined as unknown as TempWorkspace;
+  try {
+    expect(snapshotUserRepo(t.repo)).toEqual(before);
+  } finally {
+    rmSync(t.dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    t = undefined;
+  }
 });
 
-async function createRun(body: Record<string, unknown> = {}) {
+async function api<T>(method: 'GET' | 'POST', url: string, payload?: object) {
   const res = await app.inject({
-    method: 'POST',
-    url: '/api/runs',
+    method,
+    url,
     headers: auth,
-    payload: { prompt: 'Add a line to README', cwd: ws.cwd, ...body },
+    ...(payload ? { payload } : {}),
   });
-  return { res, run: res.json<RunView>() };
+  return { status: res.statusCode, body: res.json<T>() };
 }
 
-const runEnded = (runId: string) => waitFor(() => (runner.isRunning(runId) ? undefined : true));
+async function addProject(path: string) {
+  return api<ProjectView>('POST', '/api/projects', { path });
+}
+
+async function startedTask(repo: string, extra: object = {}) {
+  const project = (await addProject(repo)).body;
+  const task = (
+    await api<TaskView>('POST', `/api/projects/${project.id}/tasks`, {
+      title: 'Add a line to README',
+      prompt: 'Add a line to README',
+      agent: 'backend',
+      ...extra,
+    })
+  ).body;
+  const started = await api<TaskView>('POST', `/api/tasks/${task.id}/start`);
+  expect(started.status).toBe(201);
+  return { project, task: started.body };
+}
+
+const taskEnded = (taskId: string) =>
+  waitFor(() => (runner.isTaskRunning(taskId) ? undefined : true)).then(() => tasks.drain());
 
 describe('security', () => {
   it('health needs no token', async () => {
-    setupWith('03-stream-verbose.jsonl');
-    const res = await app.inject({ method: 'GET', url: '/health' });
-    expect(res.statusCode).toBe(200);
+    setup();
+    expect((await app.inject({ method: 'GET', url: '/health' })).statusCode).toBe(200);
   });
 
   it('rejects API calls without a token or with a wrong one (401)', async () => {
-    setupWith('03-stream-verbose.jsonl');
-    expect((await app.inject({ method: 'GET', url: '/api/runs' })).statusCode).toBe(401);
+    const r = setup();
+    expect((await app.inject({ method: 'GET', url: '/api/projects' })).statusCode).toBe(401);
     const wrong = await app.inject({
       method: 'GET',
       url: '/api/runs',
@@ -82,14 +113,14 @@ describe('security', () => {
     expect(wrong.json()).toEqual({ error: 'Missing or invalid token' });
     const post = await app.inject({
       method: 'POST',
-      url: '/api/runs',
-      payload: { prompt: 'x', cwd: ws.cwd },
+      url: '/api/projects',
+      payload: { path: r.repo },
     });
     expect(post.statusCode).toBe(401);
   });
 
   it('accepts the token as Bearer header, and as ?token= only on GET (EventSource)', async () => {
-    setupWith('03-stream-verbose.jsonl');
+    const r = setup();
     expect((await app.inject({ method: 'GET', url: '/api/runs', headers: auth })).statusCode).toBe(
       200,
     );
@@ -98,35 +129,35 @@ describe('security', () => {
     );
     const post = await app.inject({
       method: 'POST',
-      url: `/api/runs?token=${TOKEN}`,
-      payload: { prompt: 'x', cwd: ws.cwd },
+      url: `/api/projects?token=${TOKEN}`,
+      payload: { path: r.repo },
     });
     expect(post.statusCode).toBe(401);
   });
 
   it('rejects a foreign Origin even with a valid token (403)', async () => {
-    setupWith('03-stream-verbose.jsonl');
+    const r = setup();
     for (const origin of ['https://evil.example', 'http://localhost:3000', 'null']) {
       const res = await app.inject({
         method: 'POST',
-        url: '/api/runs',
+        url: '/api/projects',
         headers: { ...auth, origin },
-        payload: { prompt: 'x', cwd: ws.cwd },
+        payload: { path: r.repo },
       });
       expect(res.statusCode, origin).toBe(403);
       expect(res.json()).toEqual({ error: 'Forbidden origin' });
     }
     const ok = await app.inject({
       method: 'GET',
-      url: '/api/runs',
+      url: '/api/projects',
       headers: { ...auth, origin: ORIGIN },
     });
     expect(ok.statusCode).toBe(200);
   });
 
   it('rejects a non-loopback Host (DNS rebinding) on every route (403)', async () => {
-    setupWith('03-stream-verbose.jsonl');
-    for (const url of ['/api/runs', '/health']) {
+    setup();
+    for (const url of ['/api/projects', '/health']) {
       const res = await app.inject({
         method: 'GET',
         url,
@@ -139,67 +170,134 @@ describe('security', () => {
       expect(res.statusCode, host).toBe(200);
     }
   });
+
+  it('the old "run directly in a folder" endpoint is gone', async () => {
+    const r = setup();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/runs',
+      headers: auth,
+      payload: { prompt: 'x', cwd: r.repo },
+    });
+    expect(res.statusCode).toBe(404);
+  });
 });
 
-describe('runs API', () => {
-  it('validates the request body', async () => {
-    setupWith('03-stream-verbose.jsonl');
-    expect((await createRun({ prompt: '  ' })).res.statusCode).toBe(400);
-    expect((await createRun({ cwd: 'relative/path' })).res.json()).toEqual({
-      error: 'cwd must be an absolute path',
+describe('projects and tasks API', () => {
+  it('adds a project and lists it with its main branch and clean state', async () => {
+    const r = setup();
+    const added = await addProject(r.repo);
+    expect(added.status).toBe(201);
+    expect(added.body).toMatchObject({
+      path: r.repo,
+      mainBranch: 'main',
+      clean: true,
+      taskCount: 0,
     });
-    expect((await createRun({ cwd: `${ws.cwd}-missing` })).res.statusCode).toBe(400);
+    const list = await api<{ projects: ProjectView[] }>('GET', '/api/projects');
+    expect(list.body.projects.map((p) => p.id)).toEqual([added.body.id]);
   });
 
-  it('starts a run and reports status and cost', async () => {
-    setupWith('03-stream-verbose.jsonl');
-    const { res, run } = await createRun();
-    expect(res.statusCode).toBe(201);
-    expect(run).toMatchObject({ prompt: 'Add a line to README', cwd: ws.cwd, status: 'running' });
-    await runEnded(run.id);
+  it('validates input with clear errors', async () => {
+    const r = setup();
+    expect((await addProject('relative')).body).toEqual({ error: 'Path must be absolute' });
+    expect((await addProject(r.dir)).status).toBe(400); // not a git repo
+    const project = (await addProject(r.repo)).body;
+    const noTitle = await api('POST', `/api/projects/${project.id}/tasks`, { prompt: 'x' });
+    expect(noTitle.status).toBe(400);
+    expect((await api('GET', '/api/projects/nope/tasks')).status).toBe(404);
+    expect((await api('POST', '/api/tasks/nope/start')).status).toBe(404);
+  });
 
-    const list = await app.inject({ method: 'GET', url: '/api/runs', headers: auth });
-    const [listed] = list.json<{ runs: RunView[] }>().runs;
-    expect(listed).toMatchObject({
-      id: run.id,
-      status: 'succeeded',
-      taskStatus: 'in_review',
+  it('runs a task in its worktree and reports branch, changed files, warning and cost', async () => {
+    const r = setup({ write: { 'README.md': '# Test project\nnew line\n', 'extra.txt': 'x' } });
+    const { project, task } = await startedTask(r.repo, { expectedFiles: ['README.md'] });
+    expect(task).toMatchObject({ status: 'running', active: true, baseRef: 'main' });
+    expect(task.branch).toMatch(/^team\/add-a-line-to-readme-/);
+    await taskEnded(task.id);
+
+    const list = await api<{ tasks: TaskView[] }>('GET', `/api/projects/${project.id}/tasks`);
+    const [done] = list.body.tasks;
+    expect(done).toMatchObject({
+      status: 'in_review',
       active: false,
-      numTurns: 3,
+      changedFiles: ['README.md', 'extra.txt'],
+      unexpectedFiles: ['extra.txt'],
+      gitError: null,
     });
-    expect(listed?.costUsd).toBeGreaterThan(0);
-
-    const one = await app.inject({ method: 'GET', url: `/api/runs/${run.id}`, headers: auth });
-    expect(one.json<RunView>().id).toBe(run.id);
+    expect(done?.latestRun).toMatchObject({ status: 'succeeded', numTurns: 3 });
+    expect(done?.latestRun?.costUsd).toBeGreaterThan(0);
+    expect(readFileSync(join(r.repo, 'README.md'), 'utf8')).toBe('# Test project\n');
   });
 
+  it('a second start of a running task is a 409; a blocked task cannot start', async () => {
+    const r = setup({ hang: true });
+    const { project, task } = await startedTask(r.repo);
+    expect((await api('POST', `/api/tasks/${task.id}/start`)).status).toBe(409);
+    const dependent = await api<TaskView>('POST', `/api/projects/${project.id}/tasks`, {
+      title: 'Next',
+      prompt: 'x',
+      dependsOn: task.id,
+    });
+    expect(dependent.body.status).toBe('blocked');
+    const res = await api<{ error: string }>('POST', `/api/tasks/${dependent.body.id}/start`);
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/Waiting for/);
+  });
+
+  it('stop and cleanup', async () => {
+    const r = setup({ hang: true });
+    const { task } = await startedTask(r.repo);
+    const pids = await waitFor(() =>
+      existsSync(join(r.dir, 'pids.json'))
+        ? (JSON.parse(readFileSync(join(r.dir, 'pids.json'), 'utf8')) as {
+            self: number;
+            grandchild: number;
+          })
+        : undefined,
+    );
+    expect((await api('POST', `/api/tasks/${task.id}/cleanup`)).status).toBe(409); // still running
+
+    const stopped = await api<TaskView>('POST', `/api/tasks/${task.id}/stop`);
+    expect(stopped.body).toMatchObject({ status: 'stopped', active: false });
+    await waitFor(() =>
+      isProcessAlive(pids.self) || isProcessAlive(pids.grandchild) ? undefined : true,
+    );
+    await tasks.drain();
+
+    const cleaned = await api<TaskView>('POST', `/api/tasks/${task.id}/cleanup`, {
+      deleteBranch: true,
+    });
+    expect(cleaned.body).toMatchObject({ worktreePath: null, branch: null });
+    expect(existsSync(task.worktreePath ?? '')).toBe(false);
+  });
+});
+
+describe('runs API (watching)', () => {
   it('SSE replays stored events in seq order and ends with the run summary', async () => {
-    setupWith('03-stream-verbose.jsonl');
-    const { run } = await createRun();
-    await runEnded(run.id);
+    const r = setup();
+    const { task } = await startedTask(r.repo);
+    await taskEnded(task.id);
+    const runId = task.latestRun?.id ?? '';
 
     const res = await app.inject({
       method: 'GET',
-      url: `/api/runs/${run.id}/events?token=${TOKEN}`,
+      url: `/api/runs/${runId}/events?token=${TOKEN}`,
     });
     expect(res.headers['content-type']).toContain('text/event-stream');
     const frames = parseSse(res.body);
     const agent = frames.filter((f) => f.event === 'agent');
     expect(agent.map((f) => Number(f.id))).toEqual(agent.map((_, i) => i));
-    expect(agent.at(-1)?.data).toMatchObject({ event: { kind: 'result' } });
-    expect(frames.at(-1)).toMatchObject({
-      event: 'end',
-      data: { id: run.id, status: 'succeeded' },
-    });
+    expect(frames.at(-1)).toMatchObject({ event: 'end', data: { id: runId, status: 'succeeded' } });
   });
 
   it('SSE resumes after Last-Event-ID', async () => {
-    setupWith('03-stream-verbose.jsonl');
-    const { run } = await createRun();
-    await runEnded(run.id);
+    const r = setup();
+    const { task } = await startedTask(r.repo);
+    await taskEnded(task.id);
     const res = await app.inject({
       method: 'GET',
-      url: `/api/runs/${run.id}/events`,
+      url: `/api/runs/${task.latestRun?.id ?? ''}/events`,
       headers: { ...auth, 'last-event-id': '7' },
     });
     const ids = parseSse(res.body)
@@ -208,35 +306,19 @@ describe('runs API', () => {
     expect(ids[0]).toBe(8);
   });
 
-  it('stop kills the process tree; run and task become stopped', async () => {
-    ws = makeWorkspace();
-    setup(hangingEnv(ws));
-    const { run } = await createRun();
-    const pids = await waitForPids(ws);
+  it('lists runs with their prompt and stops a run by id', async () => {
+    const r = setup({ hang: true });
+    const { task } = await startedTask(r.repo);
+    await waitFor(() => (existsSync(join(r.dir, 'pids.json')) ? true : undefined));
+    const runs = await api<{ runs: RunView[] }>('GET', '/api/runs');
+    expect(runs.body.runs[0]).toMatchObject({ prompt: 'Add a line to README', active: true });
 
-    const res = await app.inject({
-      method: 'POST',
-      url: `/api/runs/${run.id}/stop`,
-      headers: auth,
-    });
-    expect(res.statusCode).toBe(200);
-    expect(res.json<RunView>()).toMatchObject({
-      status: 'stopped',
-      taskStatus: 'stopped',
-      active: false,
-    });
-    await waitFor(() =>
-      isProcessAlive(pids.self) || isProcessAlive(pids.grandchild) ? undefined : true,
-    );
-
-    const sse = parseSse(
-      (await app.inject({ method: 'GET', url: `/api/runs/${run.id}/events`, headers: auth })).body,
-    );
-    expect(sse.at(-1)).toMatchObject({ event: 'end', data: { status: 'stopped' } });
-  }, 20_000);
+    const stopped = await api<RunView>('POST', `/api/runs/${task.latestRun?.id ?? ''}/stop`);
+    expect(stopped.body).toMatchObject({ status: 'stopped', taskStatus: 'stopped' });
+  });
 
   it('returns 404 for unknown runs', async () => {
-    setupWith('03-stream-verbose.jsonl');
+    setup();
     for (const [method, url] of [
       ['GET', '/api/runs/nope'],
       ['GET', '/api/runs/nope/events'],

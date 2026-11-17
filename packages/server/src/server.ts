@@ -5,6 +5,7 @@ import { buildApp } from './app.js';
 import type { ClaudeCommand } from './runner/claude-cli.js';
 import { Runner } from './runner/runner.js';
 import { generateToken, originsFor } from './security.js';
+import { TaskService } from './tasks/task-service.js';
 
 // Loopback only: the server drives local agents and must never be reachable from the network.
 export const HOST = '127.0.0.1';
@@ -22,6 +23,8 @@ export interface StartServerOptions {
   /** Extra origins allowed to call the API (dev: the Vite server). */
   extraOrigins?: string[];
   claude?: ClaudeCommand;
+  /** Where task worktrees go (default ~/.squadboard/worktrees). Never inside a user repo. */
+  worktreesDir?: string;
   env?: NodeJS.ProcessEnv;
   logger?: boolean;
   token?: string;
@@ -30,12 +33,13 @@ export interface StartServerOptions {
 export interface RunningServer {
   app: FastifyInstance;
   runner: Runner;
+  tasks: TaskService;
   db: DbHandle;
   port: number;
   token: string;
   /** Open this in the browser: the UI URL with `#token=…`. */
   url: string;
-  /** Stops every agent process tree, then the HTTP server and the database. Idempotent. */
+  /** Stops every agent process tree, waits for post-run work, then closes HTTP and the database. Idempotent. */
   close(): Promise<void>;
 }
 
@@ -45,12 +49,18 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
   if (options.claude) runnerOptions.claude = options.claude;
   if (options.env) runnerOptions.env = options.env;
   const runner = new Runner(runnerOptions);
+  const tasks = new TaskService(
+    options.worktreesDir
+      ? { db: db.db, runner, worktreesDir: options.worktreesDir }
+      : { db: db.db, runner },
+  );
 
   const token = options.token ?? generateToken();
   const allowedOrigins = new Set<string>(options.extraOrigins ?? []);
   const app = buildApp({
     db: db.db,
     runner,
+    tasks,
     token,
     allowedOrigins,
     webDir: options.webDir ?? DEFAULT_WEB_DIR,
@@ -74,11 +84,13 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
   const close = () => {
     closing ??= (async () => {
       await runner.stopAll();
+      // Post-run work (commits) may still be writing to the database.
+      await tasks.drain();
       await app.close();
       db.close();
     })();
     return closing;
   };
 
-  return { app, runner, db, port, token, url, close };
+  return { app, runner, tasks, db, port, token, url, close };
 }

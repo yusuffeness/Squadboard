@@ -8,6 +8,13 @@
       "when": 1794918820192,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1794921730211,
+      "tag": "0001_task_worktrees",
+      "breakpoints": true
     }
   ]
 }

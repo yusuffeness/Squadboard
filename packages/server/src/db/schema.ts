@@ -18,14 +18,20 @@ const createdAt = () =>
     .notNull()
     .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`);
 
-export const projects = sqliteTable('projects', {
-  id: text('id').primaryKey(),
-  path: text('path').notNull(),
-  mainBranch: text('main_branch').notNull(),
-  testCommand: text('test_command'),
-  settings: text('settings', { mode: 'json' }).$type<ProjectSettings>().notNull(),
-  createdAt: createdAt(),
-});
+export const projects = sqliteTable(
+  'projects',
+  {
+    id: text('id').primaryKey(),
+    /** Repository root (as reported by git). */
+    path: text('path').notNull(),
+    /** Branch new tasks start from; never checked out, committed to or moved by Squadboard. */
+    mainBranch: text('main_branch').notNull(),
+    testCommand: text('test_command'),
+    settings: text('settings', { mode: 'json' }).$type<ProjectSettings>().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex('projects_path_idx').on(t.path)],
+);
 
 export const requests = sqliteTable('requests', {
   id: text('id').primaryKey(),
@@ -54,8 +60,23 @@ export const tasks = sqliteTable(
     expectedFiles: text('expected_files', { mode: 'json' }).$type<string[]>().notNull(),
     status: text('status').$type<TaskStatus>().notNull(),
     stage: integer('stage').notNull().default(0),
+    /** `team/<slug>-<id>`, set when the worktree is first created. */
     branch: text('branch'),
+    /** Outside the user's repo (~/.squadboard/worktrees/…). null after cleanup. */
     worktreePath: text('worktree_path'),
+    /** What the branch started from: the project's main branch, or a dependency's branch (stacked). */
+    baseRef: text('base_ref'),
+    /** Commit of `baseRef` at creation; changes are measured against it. */
+    baseCommit: text('base_commit'),
+    /** Repo-relative paths changed in the worktree, updated after each run. */
+    changedFiles: text('changed_files', { mode: 'json' }).$type<string[]>().notNull().default([]),
+    /** Changed files that match none of `expectedFiles` (shown as a warning). */
+    unexpectedFiles: text('unexpected_files', { mode: 'json' })
+      .$type<string[]>()
+      .notNull()
+      .default([]),
+    /** Last git problem for this task (worktree creation, commit), if any. */
+    gitError: text('git_error'),
     createdAt: createdAt(),
   },
   (t) => [index('tasks_request_idx').on(t.requestId)],
