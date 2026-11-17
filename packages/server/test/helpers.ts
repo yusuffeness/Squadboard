@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,7 +20,8 @@ export interface TempWorkspace {
 }
 
 export function makeWorkspace(prefix = 'squadboard-test-'): TempWorkspace {
-  const dir = mkdtempSync(join(tmpdir(), prefix));
+  // realpath: on Windows CI tmpdir() is an 8.3 short path (RUNNER~1) while git reports long paths.
+  const dir = realpathSync.native(mkdtempSync(join(tmpdir(), prefix)));
   const cwd = join(dir, 'project');
   mkdirSync(cwd);
   return { dir, cwd, dbPath: join(dir, 'test.db'), pidsFile: join(dir, 'pids.json') };

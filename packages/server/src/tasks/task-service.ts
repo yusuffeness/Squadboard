@@ -1,5 +1,5 @@
 import { canTransition, patternsOverlap, type TaskStatus } from '@squadboard/core';
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import type { Db } from '../db/index.js';
@@ -94,7 +94,7 @@ export class TaskService {
   constructor(options: TaskServiceOptions) {
     this.db = options.db;
     this.runner = options.runner;
-    this.worktreesDir = resolve(options.worktreesDir ?? defaultWorktreesDir());
+    this.worktreesDir = canonicalDir(options.worktreesDir ?? defaultWorktreesDir());
     this.agentOptions = options.agentOptions ?? DEFAULT_AGENT_OPTIONS;
   }
 
@@ -324,6 +324,16 @@ export class TaskService {
       if (dependent.status === 'blocked') setTaskStatus(this.db, dependent.id, 'planned');
     }
   }
+}
+
+/**
+ * Creates the folder and returns its canonical path. On Windows a path can be written in 8.3 short
+ * form (C:\Users\RUNNER~1); git always reports the long form, and worktree paths are compared with
+ * what git reports.
+ */
+function canonicalDir(path: string): string {
+  mkdirSync(path, { recursive: true });
+  return realpathSync.native(path);
 }
 
 function isDirectory(path: string): boolean {

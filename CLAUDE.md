@@ -51,3 +51,4 @@ Teknik tasarım: `docs/ARCHITECTURE.md`. Her işe onu okuyarak başla.
 - server, core'u derlenmiş `dist` üzerinden kullanır; server'ın `test` ve `typecheck` script'leri önce core'u build eder.
 - `better-sqlite3` hazır binary'lerle gelir. `onlyBuiltDependencies`'e **ekleme**: pnpm o zaman `node-gyp` çalıştırır ve C++ derleyicisi olmayan makinede kurulum kırılır.
 - Runner testleri gerçek CLI yerine `packages/server/test/fake-claude.mjs` kullanır; CLI'ın gerçek davranışı değişirse önce Aşama 1 kayıtlarını (`packages/core/test/fixtures/claude-cli/`) yenile.
+- Testlerde geçici klasörü `realpathSync.native(mkdtempSync(...))` ile aç: Windows CI'da `tmpdir()` 8.3 kısa yol döner (`RUNNER~1`), git ise uzun yolu raporlar; yol karşılaştıran testler yalnızca CI'da kırılır. Yerelde denemek için `TEMP`'i kısa bir yola çevirip testleri çalıştır.

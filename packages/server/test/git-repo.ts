@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -32,7 +32,8 @@ export function initRepo(dir: string): void {
 
 /** A repo on `main` with one commit, like a user's project. */
 export function makeTestRepo(files: Record<string, string> = {}): TestRepo {
-  const dir = mkdtempSync(join(tmpdir(), 'squadboard-git-'));
+  // realpath: on Windows CI tmpdir() is an 8.3 short path (RUNNER~1) while git reports long paths.
+  const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'squadboard-git-')));
   const repo = join(dir, 'repo');
   mkdirSync(repo);
   gitSync(repo, 'init', '--quiet', '--initial-branch=main');
