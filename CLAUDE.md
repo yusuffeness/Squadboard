@@ -19,6 +19,8 @@ Teknik tasarım: `docs/ARCHITECTURE.md`. Her işe onu okuyarak başla.
 - ESM (`"type": "module"`). Node paketlerinde relative import'lar `.js` uzantılı.
 - Kod, yorum ve tanımlayıcılar İngilizce.
 - Sunucu yalnızca `127.0.0.1`'e bağlanır. `--dangerously-skip-permissions` asla kullanılmaz.
+- Yeni `/api` uç noktaları `security.ts` hook'unun arkasında kalır (Host, Origin, token); güvenliği atlayan bir yol açma, token'ı loglama.
+- web, core'dan yalnızca `import type` ile tip alır (`tsconfig` `paths` → `core/src`); çalışma zamanında core'a bağlı değildir.
 - Renk ve font için Tailwind token'larını kullan (`bg-bg`, `text-ink`, `text-accent`, `text-success`, `text-warn`, `font-sans`, `font-mono`); ham hex yazma. Token'lar `packages/web/src/index.css` içindeki `@theme` bloğunda.
 
 ## Test
@@ -29,16 +31,17 @@ Teknik tasarım: `docs/ARCHITECTURE.md`. Her işe onu okuyarak başla.
 
 ## Komutlar
 
-| Komut                                          | Ne yapar                                                                      |
-| ---------------------------------------------- | ----------------------------------------------------------------------------- |
-| `pnpm dev`                                     | core'u build eder, server (4317) ve web'i (5173) birlikte başlatır            |
-| `pnpm test`                                    | Vitest, tüm paketler                                                          |
-| `pnpm lint`                                    | ESLint + Prettier kontrolü                                                    |
-| `pnpm format`                                  | Prettier ile düzelt                                                           |
-| `pnpm typecheck`                               | `tsc --noEmit`, tüm paketler                                                  |
-| `pnpm build`                                   | Tüm paketleri build eder                                                      |
-| `pnpm --filter @squadboard/server db:generate` | Şema değişince yeni SQL migration'ı üretir (`packages/server/drizzle/`)       |
-| `pnpm --filter @squadboard/server try`         | Gerçek `claude` ile tek bir görev çalıştırır (kredi harcar; elle deneme için) |
+| Komut                                          | Ne yapar                                                                                                    |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `pnpm dev`                                     | core'u build eder, server (4317) ve web'i (5173) birlikte başlatır; terminaldeki `#token=…` bağlantısını aç |
+| `pnpm start`                                   | Her şeyi build eder ve `squadboard` komutunu çalıştırır (tarayıcıyı açar)                                   |
+| `pnpm test`                                    | Vitest, tüm paketler                                                                                        |
+| `pnpm lint`                                    | ESLint + Prettier kontrolü                                                                                  |
+| `pnpm format`                                  | Prettier ile düzelt                                                                                         |
+| `pnpm typecheck`                               | `tsc --noEmit`, tüm paketler                                                                                |
+| `pnpm build`                                   | Tüm paketleri build eder                                                                                    |
+| `pnpm --filter @squadboard/server db:generate` | Şema değişince yeni SQL migration'ı üretir (`packages/server/drizzle/`)                                     |
+| `pnpm --filter @squadboard/server try`         | Gerçek `claude` ile tek bir görev çalıştırır (kredi harcar; elle deneme için)                               |
 
 ## Sürüm notları
 
