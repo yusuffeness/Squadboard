@@ -28,5 +28,22 @@ export default tseslint.config(
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
     },
   },
+  {
+    // core runs in both server and browser: no Node built-ins, no UI libraries.
+    files: ['packages/core/src/**/*.ts'],
+    ignores: ['packages/core/src/**/*.test.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            { group: ['node:*'], message: 'core must not depend on Node built-ins.' },
+            { group: ['react', 'react-*', 'react/*'], message: 'core must not depend on UI.' },
+          ],
+          paths: ['fs', 'path', 'os', 'child_process', 'crypto', 'url', 'util', 'stream'],
+        },
+      ],
+    },
+  },
   prettier,
 );

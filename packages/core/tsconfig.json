@@ -3,7 +3,11 @@
   "compilerOptions": {
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "types": ["node"]
+    // Runtime code must work in both Node and the browser: no Node or DOM typings here.
+    "lib": ["ES2022"],
+    "types": [],
+    "noEmit": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
 }

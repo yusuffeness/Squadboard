@@ -5,7 +5,16 @@ import { homedir, tmpdir, userInfo } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const FIXTURES_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures');
+// Recordings live in core so its adapter tests keep working even if this spike is deleted.
+export const FIXTURES_DIR = join(
+  dirname(fileURLToPath(import.meta.url)),
+  '..',
+  '..',
+  'core',
+  'test',
+  'fixtures',
+  'claude-cli',
+);
 
 /**
  * On Windows the npm `claude` / `claude.cmd` shim just forwards to a native `claude.exe`.
