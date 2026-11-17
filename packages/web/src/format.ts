@@ -27,6 +27,27 @@ export const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
   stopped: 'Durduruldu',
 };
 
+export const TASK_STATUS_CLASS: Record<TaskStatus, string> = {
+  planned: 'text-ink/70',
+  blocked: 'text-ink/50',
+  running: 'text-accent',
+  waiting_decision: 'text-warn',
+  in_review: 'text-success',
+  changes_requested: 'text-warn',
+  done: 'text-success',
+  failed: 'text-danger',
+  stopped: 'text-ink/60',
+};
+
+/** Statuses from which a task can be (re)started (mirrors the core state machine). */
+export const STARTABLE: readonly TaskStatus[] = [
+  'planned',
+  'waiting_decision',
+  'changes_requested',
+  'failed',
+  'stopped',
+];
+
 export function formatCost(costUsd: number | null): string {
   if (costUsd === null) return '—';
   return `$${costUsd < 0.01 ? costUsd.toFixed(4) : costUsd.toFixed(2)}`;
