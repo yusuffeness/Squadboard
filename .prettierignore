@@ -5,3 +5,4 @@ pnpm-lock.yaml
 docs/ARCHITECTURE.md
 # Raw CLI output, kept byte-for-byte
 packages/core/test/fixtures
+packages/server/drizzle

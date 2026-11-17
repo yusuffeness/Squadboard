@@ -4,3 +4,8 @@ packages:
 onlyBuiltDependencies:
   - esbuild
   - '@tailwindcss/oxide'
+
+# better-sqlite3 ships prebuilt binaries for every platform (prebuilds/). Allowing its build
+# script makes pnpm run node-gyp, which needs a C++ toolchain and fails on most machines.
+ignoredBuiltDependencies:
+  - better-sqlite3
