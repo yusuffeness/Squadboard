@@ -72,7 +72,7 @@ Tüm parçalar kullanıcının bilgisayarında çalışır. Dışarı çıkan te
 
 1. Kullanıcı isteği yazar. Sunucu Planner'ı çalıştırır ve JSON plan alır.
 2. Plan arayüzde gösterilir. Kullanıcı düzenleyip onaylar.
-3. Orkestratör işleri bağımlılık sırasına göre kuyruğa alır. Her iş için bir worktree ve dal açılır (`team/<ad>`).
+3. Orkestratör işleri bağımlılık sırasına göre kuyruğa alır. Her iş için kullanıcının reposunun dışında bir worktree ve `team/<ad>` dalı açılır (bkz. Git worktree stratejisi).
 4. Runner ilgili ajanla `claude -p` başlatır. Çıkan olaylar veritabanına yazılır ve arayüze akar.
 5. İş bitince Reviewer çalışır, inceleme özetini üretir. İş "İncelemede" sütununa geçer.
 6. Kullanıcı onaylarsa Git servisi dalı `main`'e birleştirir, worktree'yi siler. Değişiklik isterse not, aynı oturuma `--resume` ile gönderilir.
@@ -87,6 +87,7 @@ squadboard/
     server/    # Fastify, orkestratör, runner, git, SQLite
                # drizzle/: SQL migration'ları; test/fake-claude.mjs: kayıtları oynatan sahte CLI
                # bin/squadboard.js → src/cli.ts: `squadboard` komutu; src/dev.ts: `pnpm dev` girişi
+               # src/git: git servisi (worktree, diff, commit); src/tasks: proje ve görev yaşam döngüsü
     web/       # React arayüzü (Vite)
     spike/     # Aşama 1 keşif kodu, ürün kodu değil (silinebilir)
   templates/   # hazır ekip şablonları (fullstack, api, fix)
@@ -106,7 +107,7 @@ Tek dil: TypeScript. Sunucu, arayüz ve ortak tipler aynı dilde olur, katkı ve
 | Sunucu | Fastify | Hızlı, şema doğrulamalı, SSE kolay | Hono, Express |
 | Canlı olaylar | Server-Sent Events | Tek yönlü akış yeter, WebSocket'ten basit | WebSocket |
 | Süreç yönetimi | `execa` + kendi süreç ağacı sonlandırmamız | `claude` sürecini başlatmak ve satır satır okumak için. execa ağacı kendisi öldürmez: Windows'ta `taskkill /T /F`, POSIX'te `detached` süreç grubu ve `kill(-pid)` (`packages/server/src/runner/kill-tree.ts`) | `child_process` |
-| Git | `git` komutu (`simple-git` sarıcı) | Worktree ve diff için resmi komutlar | `isomorphic-git` (worktree zayıf) |
+| Git | `git` komutu, doğrudan execa ile (`packages/server/src/git/git.ts`) | Worktree ve diff için resmi komutlar; gereken birkaç komut için ayrı sarıcıya gerek yok | `simple-git`, `isomorphic-git` (worktree zayıf) |
 | Depo | SQLite (`better-sqlite3`) + Drizzle ORM | Kurulum gerektirmez, tek dosya. `better-sqlite3` tüm platformlar için hazır derlenmiş binary'lerle gelir; build script'ine izin verilmez (`pnpm-workspace.yaml` → `ignoredBuiltDependencies`), yoksa pnpm C++ derleyicisi isteyen `node-gyp`'i çalıştırır | JSON dosyaları |
 | Şema doğrulama | Zod | Plan, şablon ve olay şemaları | Ajv |
 | Arayüz | React + Vite | Olgun ekosistem, hızlı geliştirme | Svelte, Solid |
@@ -143,7 +144,7 @@ Uygulama Claude Code'u başsız modda çalıştırır. Kimlik bilgisine dokunmaz
 **Örnek çağrı (Backend işi)**
 
 ```bash
-cd .ekip/worktrees/auth-api
+cd ~/.squadboard/worktrees/<proje-id>/auth-api-9f3c
 claude -p "$GÖREV_METNİ" \
   --session-id "$RUN_SESSION_ID" \
   --append-system-prompt "$(cat .team/backend.md)" \
@@ -177,11 +178,18 @@ claude -p "$GÖREV_METNİ" \
 
 `resume()` işin son oturumunu, o oturumun kaydedildiği klasörden `--resume` ile sürdürür; başka bir klasör verilirse süreci başlatmadan hata verir. Testler gerçek CLI yerine `packages/server/test/fake-claude.mjs` ile çalışır: Aşama 1 kayıtlarını oynatır, `--verbose` ve klasöre bağlı oturum davranışını taklit eder, durdurma testi için torun süreç başlatabilir. CI'da gerçek `claude` gerekmez.
 
-**HTTP API** (`packages/server/src/routes/runs.ts`, Aşama 4). Hepsi anahtar ister (yukarıdaki Güvenlik bölümü).
+**HTTP API** (`packages/server/src/routes/`, Aşama 4–5). Hepsi anahtar ister (yukarıdaki Güvenlik bölümü). Hatalar `{ "error": "…" }` olarak döner (400 geçersiz girdi, 404 bulunamadı, 409 şu an yapılamaz).
 
 | Uç nokta | Ne yapar |
 | --- | --- |
-| `POST /api/runs` | `{ prompt, cwd, model?, maxBudgetUsd? }`. `cwd` mutlak yol ve var olan bir klasör olmalı. Proje (yola göre), istek ve iş kaydı oluşturur, runner'ı başlatır, 201 ile run özetini döner. |
+| `GET /api/projects` | Projeler: yol, ana dal, kullanıcının çalışma ağacı temiz mi (`clean`), görev sayısı. |
+| `POST /api/projects` | `{ path }`. Mutlak yol, commit'i olan bir git reposu olmalı (alt klasör verilirse repo köküne çevrilir). O an çıkış yapılmış dal "ana dal" olur. Aynı repo ikinci kez eklenirse var olan proje döner. |
+| `GET /api/projects/:id/tasks` | Görevler (oluşturulma sırasıyla): durum, ajan, dal, değişen ve beklenmeyen dosyalar, git hatası, son run. |
+| `POST /api/projects/:id/tasks` | `{ title, prompt, agent?, expectedFiles?, dependsOn? }`. `dependsOn` bitmemiş bir görevse yeni görev `blocked` başlar. |
+| `GET /api/tasks/:id` | Tek görev. |
+| `POST /api/tasks/:id/start` | Worktree'yi (yoksa) açar ve görevi orada başlatır. Çalışıyorsa, bağımlılığı bitmediyse ya da durumu izin vermiyorsa 409. |
+| `POST /api/tasks/:id/stop` | Görevin çalışan sürecini (ağacıyla) durdurur. |
+| `POST /api/tasks/:id/cleanup` | `{ deleteBranch? }`. Worktree'yi siler; dal varsayılan olarak kalır. Çalışan görevde ya da dalı hâlâ başlangıç noktası olarak bekleyen bir görev varken dal silme isteğinde 409. |
 | `GET /api/runs` | Son 50 run: istek metni, klasör, durum, iş durumu, maliyet, tur, süre, `active`. |
 | `GET /api/runs/:id` | Tek run özeti. |
 | `POST /api/runs/:id/stop` | Süreç ağacını öldürür, güncel özeti döner (bitmiş run'da etkisizdir). |
@@ -189,7 +197,7 @@ claude -p "$GÖREV_METNİ" \
 
 Geçmişi oynatma ile canlı dinlemeye geçiş aynı senkron adımda yapılır: `better-sqlite3` senkron çalışır ve runner her olayı yayınlamadan önce veritabanına yazar; bu yüzden aradaki bir olay kaybolamaz ya da iki kez gönderilemez.
 
-Prototip ajanı (`PROTOTYPE_AGENT`): `acceptEdits`, araçlar `Read, Edit, Write, Glob, Grep` (kabuk komutu yok), bütçe $1. Gerçek ajanlar ve araç listeleri ileride `.team/` şablonlarından gelecek.
+Ajanlar şimdilik tek bir varsayılanla çalışır (`DEFAULT_AGENT_OPTIONS`, `tasks/task-service.ts`): `acceptEdits`, araçlar `Read, Edit, Write, Glob, Grep`, hem `--tools` (kullanılabilir araç kümesi) hem `--allowedTools` ile; yalnızca `--allowedTools` kabuk komutlarını engellemiyor (bkz. claude-cli-notes §13). Bütçe $1. Ajan adı (`general`, `backend`…) yalnızca etiket; gerçek ajanlar ve araç listeleri ileride `.team/` şablonlarından gelecek. Aşama 4'teki "klasörde doğrudan çalıştır" ucu (`POST /api/runs`) Aşama 5'te kaldırıldı, çünkü ajanı kullanıcının çalışma ağacında çalıştırıyordu; run'lar artık yalnızca görevler üzerinden, görevin worktree'sinde başlar.
 
 **Oturum ve süreç.**
 
@@ -197,10 +205,27 @@ Prototip ajanı (`PROTOTYPE_AGENT`): `acceptEdits`, araçlar `Read, Edit, Write,
 - Durdurma: Windows'ta `child.kill()` yalnızca `claude.exe`'yi öldürür, ajanın başlattığı bash ve node süreçleri yetim kalır. Süreç ağacı Windows'ta `taskkill /PID <pid> /T /F` ile, POSIX'te süreç grubu (`detached` + `process.kill(-pid)`) ile sonlandırılır. Öldürülen koşuda `result` olayı gelmez; runner bunu `stopped` sayar. Öldürülen oturum sonradan `--resume` ile sürdürülebilir.
 - Windows'ta npm'in `claude.cmd` dosyası yalnızca `bin/claude.exe`'ye yönlendirir; `.exe` doğrudan çalıştırılır (`shell: true` argüman tırnaklamasını bozar).
 - Sunucu bir Claude Code oturumunun içinden başlatılırsa `CLAUDECODE`, `CLAUDE_CODE_SESSION_ID` gibi oturum değişkenleri alt süreçlere geçer; runner bunları temizleyerek başlatır. Temizlik açık bir yasak listesiyle yapılır (`claude-cli.ts`), çünkü `CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_USE_BEDROCK`, `ANTHROPIC_API_KEY` gibi kullanıcı ayarları korunmalıdır.
-- POSIX'te süreç `detached` başlatıldığı için Squadboard kapanırsa ajan süreçleri kendiliğinden ölmez. Bu yüzden sunucu `SIGINT`, `SIGTERM`, `SIGHUP` (Windows'ta ayrıca `SIGBREAK`; Windows'ta Ctrl+C `SIGINT` olarak gelir) aldığında önce `runner.stopAll()` ile tüm süreç ağaçlarını öldürür, sonra HTTP sunucusunu ve veritabanını kapatır (`packages/server/src/shutdown.ts`). İkinci sinyal hemen çıkar. Sunucu zorla öldürülürse (`kill -9`, Görev Yöneticisi) bu çalışmaz; açılışta yetim run'ları `stopped` yapmak sonraki bir aşamanın işi.
+- POSIX'te süreç `detached` başlatıldığı için Squadboard kapanırsa ajan süreçleri kendiliğinden ölmez. Bu yüzden sunucu `SIGINT`, `SIGTERM`, `SIGHUP` (Windows'ta ayrıca `SIGBREAK`; Windows'ta Ctrl+C `SIGINT` olarak gelir) aldığında önce `runner.stopAll()` ile tüm süreç ağaçlarını öldürür, run sonrası git işlerinin (commit, değişen dosyalar) bitmesini bekler (`tasks.drain()`), sonra HTTP sunucusunu ve veritabanını kapatır (`packages/server/src/shutdown.ts`). İkinci sinyal hemen çıkar. Sunucu zorla öldürülürse (`kill -9`, Görev Yöneticisi) bu çalışmaz; açılışta yetim run'ları `stopped` yapmak sonraki bir aşamanın işi.
 - `-p` modunda kullanıcının global ayarları, skill'leri ve hafızası yüklenir; ajan davranışı kullanıcıdan kullanıcıya değişebilir. `--strict-mcp-config` MCP sunucularını kapatır; `--setting-sources` ileride değerlendirilir (`--bare` abonelikle çalışmaz).
 
-**Worktree.** Claude Code'un kendi [`--worktree`/`-w` bayrağı](https://claudefa.st/blog/guide/development/worktree-guide) `.claude/worktrees/<ad>/` altında çalışma dizini açıyor ve değişiklik yoksa temizliyor. Biz ilk sürümde worktree'yi kendimiz `git worktree add` ile açıyoruz: dal adını (`team/auth-api`) ve bir önceki işin dalından başlatmayı biz belirlemek istiyoruz. Bu bir tasarım tercihi; `-w` daha az kod demek, ikisi de denenebilir.
+**Git worktree stratejisi** (`packages/server/src/git/`, `packages/server/src/tasks/`, Aşama 5)
+
+Claude Code'un kendi [`--worktree`/`-w` bayrağı](https://claudefa.st/blog/guide/development/worktree-guide) da var; biz worktree'yi kendimiz `git worktree add` ile açıyoruz, çünkü dal adını ve yığın dalları biz belirlemek istiyoruz.
+
+*Temel kural: kullanıcının çalışma ağacına ve ana dalına asla dokunulmaz.* Squadboard kullanıcının klasöründe dosya yazmaz, `checkout` / `reset` / `commit` yapmaz, çıkış yapılmış dalı ve `main` ref'ini oynatmaz. Repoya dokunan tek şeyler `git worktree` kayıtları (`.git/worktrees/`) ve `team/` altındaki dallardır. Git servisi `team/` dışında dal oluşturmayı, silmeyi ve commit atmayı reddeder. Testler her senaryodan sonra kullanıcı reposunun dalını, HEAD'ini, `main` ref'ini ve `git status` çıktısını karşılaştırır.
+
+| Konu | Karar |
+| --- | --- |
+| Worktree yeri | `~/.squadboard/worktrees/<proje-id>/<dal-adı>` (`SQUADBOARD_WORKTREES` ile değiştirilebilir). Kullanıcının reposunun **dışında**: rapordaki `.ekip/worktrees` yolu çalışma ağacına izlenmeyen bir klasör eklerdi. |
+| Dal adı | `team/<başlık-slug>-<görev id'sinin ilk 4 karakteri>`, Türkçe karakterler ASCII'ye çevrilir (`Giriş API` → `team/giris-api-9f3c`). |
+| Ne zaman açılır | Görev ilk kez başlatılınca. Temizlendikten sonra yeniden başlatılırsa aynı yolda, var olan dal üzerinde yeniden açılır; böylece Claude oturumu (klasöre bağlı) da sürdürülebilir kalır. |
+| Başlangıç noktası | Bağımlılığı yoksa projenin ana dalı. Bağımlılığı varsa o görevin dalı (**yığın dal**). Başlangıç commit'i (`baseCommit`) kaydedilir; değişiklikler ona göre ölçülür. Şimdilik en fazla bir bağımlılık; birden çoğu iki dalı birleştirmeyi gerektirir (Aşama 6). |
+| Bağımlılık | Bağımlı görev, bağımlılığı `in_review` ya da `done` olana kadar `blocked` kalır; bağımlılık bitince otomatik `planned` olur. |
+| Ajanın işi | Run `in_review` ile bitince worktree'deki her şey görevin **kendi dalına** commit'lenir (`squadboard: <başlık>`), bağımlı görev bu commit'ten başlar. Repoda `user.email` yoksa "Squadboard &lt;squadboard@localhost&gt;" kimliği kullanılır. Durdurulan ya da beklemeye düşen işler commit'lenmez. |
+| Değişen dosyalar | Her run'dan sonra `git diff --name-only <baseCommit>` + izlenmeyen yeni dosyalar. `expectedFiles` doluysa bunlarla eşleşmeyenler `unexpectedFiles` olarak işaretlenir (arayüzde uyarı). Desen eşleme core'daki `patternsOverlap` ile. |
+| Temizlik | `git worktree remove --force` + `prune`. Dal varsayılan olarak kalır (commit'lenmiş iş onda). İstenirse dal da silinir; ama dalı başlangıç noktası olarak bekleyen bir görev varsa reddedilir. Çalışan görev temizlenemez. |
+| Eşzamanlılık | Aynı repoda git işlemleri repo başına bir kilitle sıraya alınır (`.git` kilit dosyalarına takılmamak için). |
+| Kullanıcının bekleyen değişiklikleri | Proje görünümünde `clean: false` ise uyarı gösterilir: ajanlar commit'lenmemiş değişiklikleri görmez, çünkü worktree'ler commit'ten açılır. |
 
 **Alternatif: Agent SDK.** `@anthropic-ai/claude-agent-sdk` aynı motoru kütüphane olarak sunuyor, ama belgelere göre ürün yapan geliştiricilerin API anahtarı kullanması bekleniyor (bölüm 11). Bu yüzden CLI'ı doğrudan çağırmak ilk tercihimiz; SDK, API anahtarıyla çalışmak isteyenler için ikinci bir sürücü (driver) olabilir.
 
@@ -284,7 +309,7 @@ Tek bir SQLite dosyası, kullanıcının ana dizininde: `~/.squadboard/squadboar
 | --- | --- |
 | `projects` | id, yol, ana dal, test komutu, ayarlar |
 | `requests` | id, project, metin, oluşturma zamanı, plan JSON'u |
-| `tasks` | id (tüm sistemde tekil; plandaki kısa kimlikler istek içinde tekil olduğundan sunucu bunları ad alanına koyar), request, başlık, ajan, bağımlılıklar, beklenen dosyalar, dal, worktree yolu, durum, aşama |
+| `tasks` | id (tüm sistemde tekil; plandaki kısa kimlikler istek içinde tekil olduğundan sunucu bunları ad alanına koyar), request, başlık, ajan, bağımlılıklar, beklenen dosyalar, dal, worktree yolu, başlangıç dalı ve commit'i, değişen dosyalar, beklenmeyen dosyalar, git hatası, durum, aşama |
 | `runs` | id, task, oturum kimliği, çalışma klasörü (resume için), devam ettirdiği run, pid, exit code, hata, başlangıç, bitiş, sonuç durumu, maliyet, tur sayısı |
 | `events` | id, run, sıra (`run` içinde tekil), tip, `AgentEvent` JSON'u, ham CLI satırı (o satırdan çıkan ilk olayda) |
 | `decisions` | id, request, task (Planner kararlarında boş), kaynak (`planner` / `agent`), soru, seçenekler, seçim, zaman |
@@ -356,8 +381,8 @@ Numaralar "Aşama Planı ve Promptlar" belgesindeki aşamalarla aynıdır.
 | 1. CLI keşfi | `claude -p` biçimleri, `--resume`, izinler, `--json-schema`, KARAR ölçümü, süreç sonlandırma; gerçek çıktılar kaydedildi | [claude-cli-notes.md](claude-cli-notes.md) yazıldı, KARAR güvenilirliği sayısal | ✅ |
 | 2. Core | Zod şemaları ve tipler, iş durum makinesi, stream-json adaptörü, KARAR ayrıştırıcı, plan doğrulama ve sıralama | Kayıtlı CLI çıktıları adaptörden hatasız geçiyor; geçersiz geçiş ve plan döngüsü testlerle yakalanıyor | ✅ |
 | 3. Runner ve SQLite | SQLite + Drizzle (7 tablo, ilk migration), `claude -p` sürecini başlatma ve süreç ağacıyla sonlandırma, `--session-id` / `--resume`, `permission_denials` ve stderr hatalarını işleme, ortam temizliği, sahte CLI ile testler | Sahte CLI ile başlat, akış, durdur ve sürdür testleri Windows ve Linux'ta yeşil; olaylar DB'ye sırayla yazılıyor; durdurma sonrası artık süreç kalmıyor | ✅ (Windows ve Linux CI) |
-| 4. Server, SSE ve prototip arayüz | Anahtar + Host/Origin denetimi, run API'si, SSE canlı akış, tek sayfalık arayüz, `squadboard` komutu, kapanışta `stopAll()` | Tarayıcıda prompt yazıp gerçek `claude` çıktısı canlı izleniyor; Durdur süreci öldürüyor; anahtarsız ya da yanlış Origin'li istek reddediliyor; yenileyince geçmiş run'lar görünüyor | Kod ✅; elle deneme ve karar noktası (kredi, KARAR) bekliyor |
-| 5. Pano ve worktree | SQLite, işler ve durumlar, worktree ve dal açma, Pano ekranı, durdur ve sürdür | İki iş paralel, farklı dallarda çalışıp biri birleştirilebiliyor | |
+| 4. Server, SSE ve prototip arayüz | Anahtar + Host/Origin denetimi, run API'si, SSE canlı akış, tek sayfalık arayüz, `squadboard` komutu, kapanışta `stopAll()` | Tarayıcıda prompt yazıp gerçek `claude` çıktısı canlı izleniyor; Durdur süreci öldürüyor; anahtarsız ya da yanlış Origin'li istek reddediliyor; yenileyince geçmiş run'lar görünüyor | ✅ (elle denendi) |
+| 5. Proje, görev ve git worktree | Git servisi, proje ekleme, görev oluşturma ve başlatma, her görev kendi worktree ve `team/` dalında, yığın dallar, değişen/beklenmeyen dosyalar, temizlik, sıralı görev listesi | İki görev aynı anda ayrı worktree'lerde çalışıyor; kullanıcının klasöründe hiçbir dosya değişmiyor; git testleri yeşil, worktree temizlenebiliyor | Kod ✅; elle deneme bekliyor |
 | 6. Planner ve zamanlayıcı | Planner (`--json-schema`, `openDecisions`), Plan onayı ekranı, bağımlılık ve çakışma kontrolü, KARAR yedek akışı, izin kartı | Tek istekten 4-5 iş sırayla ve paralel çalışıyor; plan kararları onayda cevaplanıyor | |
 | 7. Reviewer ve cilalama | Reviewer şeması, İnceleme ekranı, test komutu, isim modları, Ekibini kur ekranı | Tasarım taslaklarındaki dört ekranın tam akışı çalışıyor | |
 | 8. Yayın | `npx` paketi, Windows/macOS/Linux denemesi, README (kurulum, kredi uyarısı), şablonlar, lisans, kısa demo videosu | Temiz bir bilgisayarda tek komutla kurulup ilk işin bittiği görülüyor | |
