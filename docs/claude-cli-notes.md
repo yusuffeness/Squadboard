@@ -200,7 +200,31 @@ Ajana 120 s süren bir komut (`node -e "setTimeout(…)"`) çalıştırıldı; W
 ## 10. Denenmedi / açık kalanlar
 
 - Kredi bittiğinde ya da rate limit dolduğunda CLI'ın davranışı (tetiklenemedi).
-- macOS/Linux'ta process grubu sonlandırma.
+- macOS/Linux'ta process grubu sonlandırma: Aşama 3'te uygulandı ve sahte CLI ile Linux CI'da test ediliyor; gerçek `claude` ile henüz denenmedi.
 - KARAR'ın gerçekçi, daha az net görevlerde gereksiz soru oranı ve haiku/opus ile farkı.
 - Worktree içinde çalıştırma (`git worktree add` + o klasörden `claude -p`) ve `-w` bayrağı.
 - `--input-format stream-json` (açık oturuma stdin'den mesaj göndermek): KARAR/izin akışında `--resume` yerine kullanılabilir mi?
+
+## 11. Runner'da nasıl uygulandı (Aşama 3)
+
+Bu bulgular `packages/server/src/runner/` içinde koda döküldü; testler gerçek CLI yerine `packages/server/test/fake-claude.mjs` ile çalışıyor (yukarıdaki kayıtları oynatır).
+
+| Bulgu                                              | Runner'daki karşılığı                                                                                                                             | Testi                                                                                                                    |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `stream-json` için `--verbose` zorunlu (§1)        | `buildClaudeArgs` ikisini her zaman birlikte ekler                                                                                                | `claude-cli.test.ts`; sahte CLI `--verbose` yoksa gerçek hatayı verir                                                    |
+| `--session-id` çalışıyor (§2)                      | Oturum kimliği süreç başlamadan üretilir ve `runs` satırına yazılır                                                                               | "passes the agent options to the CLI"                                                                                    |
+| Oturum klasöre bağlı (§2)                          | `resume()` oturumu kaydedildiği klasörden başlatır; başka klasör verilirse süreç başlatmadan hata verir                                           | "resume refuses another directory"                                                                                       |
+| Bilinmeyen oturum yalnızca stderr'de (§2)          | `classifyCliStderr` → `session_not_found` olayı, run ve iş `failed`                                                                               | "resume of a session the CLI does not know"                                                                              |
+| İzin reddi işi durdurmuyor (§3)                    | `permission_denials` doluysa run `succeeded` ama iş `waiting_decision`                                                                            | "denied tools"                                                                                                           |
+| `error_max_turns`: `result` alanı yok, exit 1 (§3) | Run ve iş `failed`, hata `errors[]`'tan                                                                                                           | "error result (max turns)"                                                                                               |
+| KARAR (§5)                                         | Geçerli blok → sorular `decisions` tablosuna `agent` kaynağıyla, iş `waiting_decision`                                                            | "KARAR block"                                                                                                            |
+| Windows'ta `kill()` yetim bırakır (§6)             | Windows: `taskkill /PID <pid> /T /F`; POSIX: `detached` + `kill(-pid)`, önce SIGTERM sonra SIGKILL                                                | "stop kills the whole process tree": sahte CLI bir torun süreç başlatır, durdurmadan sonra ikisinin de öldüğü doğrulanır |
+| Öldürülen koşuda `result` yok (§6)                 | `stop()` sonrası run ve iş `stopped`; o ana kadarki olaylar DB'de kalır                                                                           | aynı test                                                                                                                |
+| İç içe oturum değişkenleri (§8)                    | `cleanEnv`: açık yasak listesi (`CLAUDECODE`, `CLAUDE_CODE_SESSION_ID`, …); kullanıcı ayarları (`CLAUDE_CONFIG_DIR`, `ANTHROPIC_API_KEY`) korunur | "removes Claude Code session variables"                                                                                  |
+| Windows'ta `.cmd` yerine `.exe` (§8)               | `resolveClaudeCommand` önce `claude.exe`'yi arar, `SQUADBOARD_CLAUDE_BIN` ile değiştirilebilir                                                    | —                                                                                                                        |
+
+Notlar:
+
+- Spike'taki ortam temizliği bütün `CLAUDE*` değişkenlerini siliyordu; runner'da bu, kullanıcının kendi ayarlarını da sileceği için açık bir yasak listesine çevrildi.
+- Durdurma testinin gerçekten yetim süreci yakaladığı doğrulandı: `taskkill /T` geçici olarak düz `process.kill` ile değiştirilince test kırmızıya döndü (yetim torun süreç yüzünden zaman aşımı).
+- Gerçek CLI ile uçtan uca deneme için: `pnpm --filter @squadboard/server try` (haiku, salt okunur araçlar, $0.25 bütçe sınırı, geçici bir klasörde).

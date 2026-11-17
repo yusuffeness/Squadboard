@@ -29,16 +29,21 @@ Teknik tasarım: `docs/ARCHITECTURE.md`. Her işe onu okuyarak başla.
 
 ## Komutlar
 
-| Komut            | Ne yapar                                                           |
-| ---------------- | ------------------------------------------------------------------ |
-| `pnpm dev`       | core'u build eder, server (4317) ve web'i (5173) birlikte başlatır |
-| `pnpm test`      | Vitest, tüm paketler                                               |
-| `pnpm lint`      | ESLint + Prettier kontrolü                                         |
-| `pnpm format`    | Prettier ile düzelt                                                |
-| `pnpm typecheck` | `tsc --noEmit`, tüm paketler                                       |
-| `pnpm build`     | Tüm paketleri build eder                                           |
+| Komut                                          | Ne yapar                                                                      |
+| ---------------------------------------------- | ----------------------------------------------------------------------------- |
+| `pnpm dev`                                     | core'u build eder, server (4317) ve web'i (5173) birlikte başlatır            |
+| `pnpm test`                                    | Vitest, tüm paketler                                                          |
+| `pnpm lint`                                    | ESLint + Prettier kontrolü                                                    |
+| `pnpm format`                                  | Prettier ile düzelt                                                           |
+| `pnpm typecheck`                               | `tsc --noEmit`, tüm paketler                                                  |
+| `pnpm build`                                   | Tüm paketleri build eder                                                      |
+| `pnpm --filter @squadboard/server db:generate` | Şema değişince yeni SQL migration'ı üretir (`packages/server/drizzle/`)       |
+| `pnpm --filter @squadboard/server try`         | Gerçek `claude` ile tek bir görev çalıştırır (kredi harcar; elle deneme için) |
 
 ## Sürüm notları
 
 - TypeScript `~6.0` sabit: typescript-eslint 8 henüz TS 7'yi desteklemiyor.
 - Tailwind v4: config dosyası yok, token'lar CSS `@theme` içinde.
+- server, core'u derlenmiş `dist` üzerinden kullanır; server'ın `test` ve `typecheck` script'leri önce core'u build eder.
+- `better-sqlite3` hazır binary'lerle gelir. `onlyBuiltDependencies`'e **ekleme**: pnpm o zaman `node-gyp` çalıştırır ve C++ derleyicisi olmayan makinede kurulum kırılır.
+- Runner testleri gerçek CLI yerine `packages/server/test/fake-claude.mjs` kullanır; CLI'ın gerçek davranışı değişirse önce Aşama 1 kayıtlarını (`packages/core/test/fixtures/claude-cli/`) yenile.
