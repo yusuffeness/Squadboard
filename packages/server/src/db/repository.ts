@@ -7,7 +7,7 @@ import {
   type RunStatus,
   type TaskStatus,
 } from '@squadboard/core';
-import { and, asc, desc, eq, isNotNull } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, isNotNull } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import type { Db } from './index.js';
 import { decisions, events, projects, requests, runs, tasks } from './schema.js';
@@ -221,4 +221,66 @@ export function listDecisions(db: Db, taskId: string): DecisionRow[] {
     .where(eq(decisions.taskId, taskId))
     .orderBy(asc(decisions.createdAt))
     .all();
+}
+
+/** What the API returns for a run: the run plus its prompt and task status. */
+export interface RunSummary {
+  id: string;
+  taskId: string;
+  prompt: string;
+  cwd: string;
+  status: RunRow['status'];
+  taskStatus: TaskRow['status'];
+  sessionId: string | null;
+  costUsd: number | null;
+  numTurns: number | null;
+  error: string | null;
+  startedAt: string;
+  endedAt: string | null;
+}
+
+function runSummaryQuery(db: Db) {
+  return db
+    .select({
+      id: runs.id,
+      taskId: runs.taskId,
+      prompt: requests.text,
+      cwd: runs.cwd,
+      status: runs.status,
+      taskStatus: tasks.status,
+      sessionId: runs.sessionId,
+      costUsd: runs.costUsd,
+      numTurns: runs.numTurns,
+      error: runs.error,
+      startedAt: runs.startedAt,
+      endedAt: runs.endedAt,
+    })
+    .from(runs)
+    .innerJoin(tasks, eq(runs.taskId, tasks.id))
+    .innerJoin(requests, eq(tasks.requestId, requests.id));
+}
+
+export function listRunSummaries(db: Db, limit = 50): RunSummary[] {
+  return runSummaryQuery(db).orderBy(desc(runs.startedAt)).limit(limit).all();
+}
+
+export function getRunSummary(db: Db, id: string): RunSummary | undefined {
+  return runSummaryQuery(db).where(eq(runs.id, id)).get();
+}
+
+export function findProjectByPath(db: Db, path: string): ProjectRow | undefined {
+  return db.select().from(projects).where(eq(projects.path, path)).get();
+}
+
+export function listEventsAfter(
+  db: Db,
+  runId: string,
+  afterSeq: number,
+): (EventRow & { data: AgentEvent })[] {
+  return db
+    .select()
+    .from(events)
+    .where(and(eq(events.runId, runId), gt(events.seq, afterSeq)))
+    .orderBy(asc(events.seq))
+    .all() as (EventRow & { data: AgentEvent })[];
 }

@@ -1,14 +1,6 @@
-import { buildApp } from './app.js';
-
-// Bind to loopback only: the server drives local agents and must never be reachable from the network.
-const HOST = '127.0.0.1';
-const PORT = Number(process.env.SQUADBOARD_PORT ?? 4317);
-
-const app = buildApp({ logger: true });
-
-try {
-  await app.listen({ host: HOST, port: PORT });
-} catch (err) {
-  app.log.error(err);
-  process.exit(1);
-}
+// Library entry. The `squadboard` command is src/cli.ts; development uses src/dev.ts.
+export { buildApp, type AppOptions } from './app.js';
+export { startServer, type RunningServer, type StartServerOptions } from './server.js';
+export { openDatabase, defaultDbPath, type Db, type DbHandle } from './db/index.js';
+export { Runner, type RunHandle, type RunOutcome } from './runner/runner.js';
+export { resolveClaudeCommand, type ClaudeCommand } from './runner/claude-cli.js';
