@@ -1,0 +1,24 @@
+{
+  "name": "20-resume-other-cwd",
+  "claudeVersion": "2.1.150 (Claude Code)",
+  "platform": "win32",
+  "args": [
+    "-p",
+    "Reply with only: OK",
+    "--resume",
+    "ddf6b34d-829a-4990-a50b-bbc989a74083",
+    "--output-format",
+    "json",
+    "--model",
+    "haiku",
+    "--strict-mcp-config",
+    "--max-budget-usd",
+    "0.50"
+  ],
+  "exitCode": 1,
+  "signal": null,
+  "durationMs": 1711,
+  "timedOut": false,
+  "stderr": "No conversation found with session ID: ddf6b34d-829a-4990-a50b-bbc989a74083\n",
+  "lineTimingsMs": []
+}

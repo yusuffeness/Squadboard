@@ -1,0 +1,34 @@
+{
+  "name": "15-max-turns",
+  "claudeVersion": "2.1.150 (Claude Code)",
+  "platform": "win32",
+  "args": [
+    "-p",
+    "Add an exported `subtract(a, b)` function to math.js. Then run `npm test` with the Bash tool and report its output. Do not ask me anything.",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--permission-mode",
+    "acceptEdits",
+    "--max-turns",
+    "1",
+    "--model",
+    "haiku",
+    "--strict-mcp-config",
+    "--max-budget-usd",
+    "0.50"
+  ],
+  "exitCode": 1,
+  "signal": null,
+  "durationMs": 3177,
+  "timedOut": false,
+  "stderr": "",
+  "lineTimingsMs": [
+    764,
+    1543,
+    2118,
+    2592,
+    2601,
+    2605
+  ]
+}

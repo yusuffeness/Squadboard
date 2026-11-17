@@ -1,0 +1,26 @@
+{
+  "name": "21-resume-killed",
+  "claudeVersion": "2.1.150 (Claude Code)",
+  "platform": "win32",
+  "args": [
+    "-p",
+    "The previous command was interrupted. Do not run it again. In one sentence: what were you doing?",
+    "--resume",
+    "426dcf48-9bc5-4dd2-a154-070d1127050a",
+    "--output-format",
+    "json",
+    "--model",
+    "haiku",
+    "--strict-mcp-config",
+    "--max-budget-usd",
+    "0.50"
+  ],
+  "exitCode": 0,
+  "signal": null,
+  "durationMs": 4151,
+  "timedOut": false,
+  "stderr": "",
+  "lineTimingsMs": [
+    3580
+  ]
+}

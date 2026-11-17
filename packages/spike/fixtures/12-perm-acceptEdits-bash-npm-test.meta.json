@@ -1,0 +1,42 @@
+{
+  "name": "12-perm-acceptEdits-bash-npm-test",
+  "claudeVersion": "2.1.150 (Claude Code)",
+  "platform": "win32",
+  "args": [
+    "-p",
+    "Add an exported `subtract(a, b)` function to math.js. Then run `npm test` with the Bash tool and report its output. Do not ask me anything.",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--permission-mode",
+    "acceptEdits",
+    "--allowedTools",
+    "Read,Edit,Write,Bash(npm test:*)",
+    "--model",
+    "haiku",
+    "--strict-mcp-config",
+    "--max-budget-usd",
+    "0.50"
+  ],
+  "exitCode": 0,
+  "signal": null,
+  "durationMs": 9300,
+  "timedOut": false,
+  "stderr": "",
+  "lineTimingsMs": [
+    783,
+    1552,
+    2124,
+    2535,
+    2543,
+    3535,
+    4036,
+    4066,
+    5264,
+    5514,
+    7083,
+    8361,
+    8726,
+    8731
+  ]
+}

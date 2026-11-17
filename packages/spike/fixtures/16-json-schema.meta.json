@@ -1,0 +1,28 @@
+{
+  "name": "16-json-schema",
+  "claudeVersion": "2.1.150 (Claude Code)",
+  "platform": "win32",
+  "args": [
+    "-p",
+    "You are a planner. Split this request into 2-4 tasks for agents (frontend, backend, database, test): \"Add user sign-up with email and password: a users table, a POST /signup endpoint, a sign-up form, and tests.\" Do not modify any files.",
+    "--json-schema",
+    "{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"tasks\"],\"properties\":{\"tasks\":{\"type\":\"array\",\"minItems\":1,\"items\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"id\",\"title\",\"agent\",\"dependsOn\",\"expectedFiles\"],\"properties\":{\"id\":{\"type\":\"string\"},\"title\":{\"type\":\"string\"},\"agent\":{\"type\":\"string\",\"enum\":[\"frontend\",\"backend\",\"database\",\"test\"]},\"dependsOn\":{\"type\":\"array\",\"…",
+    "--output-format",
+    "json",
+    "--tools",
+    "Read,Glob,Grep",
+    "--model",
+    "haiku",
+    "--strict-mcp-config",
+    "--max-budget-usd",
+    "0.50"
+  ],
+  "exitCode": 0,
+  "signal": null,
+  "durationMs": 12458,
+  "timedOut": false,
+  "stderr": "",
+  "lineTimingsMs": [
+    11879
+  ]
+}

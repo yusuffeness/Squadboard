@@ -1,0 +1,31 @@
+{
+  "name": "07-resume-stream",
+  "claudeVersion": "2.1.150 (Claude Code)",
+  "platform": "win32",
+  "args": [
+    "-p",
+    "Spell the secret word backwards. Reply with only that.",
+    "--resume",
+    "abfe1853-745a-4326-8dc4-d7e14a632c80",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--model",
+    "haiku",
+    "--strict-mcp-config",
+    "--max-budget-usd",
+    "0.50"
+  ],
+  "exitCode": 0,
+  "signal": null,
+  "durationMs": 2957,
+  "timedOut": false,
+  "stderr": "",
+  "lineTimingsMs": [
+    1201,
+    2366,
+    2367,
+    2373,
+    2377
+  ]
+}

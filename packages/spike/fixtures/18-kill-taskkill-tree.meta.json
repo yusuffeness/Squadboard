@@ -1,0 +1,32 @@
+{
+  "name": "18-kill-taskkill-tree",
+  "claudeVersion": "2.1.150 (Claude Code)",
+  "platform": "win32",
+  "args": [
+    "-p",
+    "Run this exact command with the Bash tool and wait for it to finish: node -e \"setTimeout(()=>{}, 120000)\" squadboard-spike-marker",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--permission-mode",
+    "acceptEdits",
+    "--allowedTools",
+    "Bash",
+    "--model",
+    "haiku",
+    "--strict-mcp-config",
+    "--max-budget-usd",
+    "0.50"
+  ],
+  "exitCode": 1,
+  "signal": null,
+  "durationMs": 8710,
+  "timedOut": false,
+  "stderr": "",
+  "lineTimingsMs": [
+    828,
+    1687,
+    3655,
+    4028
+  ]
+}

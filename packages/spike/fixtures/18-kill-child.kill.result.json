@@ -1,0 +1,13 @@
+{
+  "mode": "child.kill",
+  "killedAtMs": 9919,
+  "closedAtMs": 9946,
+  "exitCode": null,
+  "signal": "SIGTERM",
+  "survivors": [
+    "4844 bash.exe",
+    "23940 bash.exe",
+    "30244 bash.exe",
+    "16192 node.exe"
+  ]
+}

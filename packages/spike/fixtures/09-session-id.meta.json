@@ -1,0 +1,26 @@
+{
+  "name": "09-session-id",
+  "claudeVersion": "2.1.150 (Claude Code)",
+  "platform": "win32",
+  "args": [
+    "-p",
+    "Reply with only: OK",
+    "--session-id",
+    "dd6ec105-7623-4210-b06e-14402ec75016",
+    "--output-format",
+    "json",
+    "--model",
+    "haiku",
+    "--strict-mcp-config",
+    "--max-budget-usd",
+    "0.50"
+  ],
+  "exitCode": 0,
+  "signal": null,
+  "durationMs": 2711,
+  "timedOut": false,
+  "stderr": "",
+  "lineTimingsMs": [
+    2160
+  ]
+}

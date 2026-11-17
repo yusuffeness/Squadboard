@@ -1,0 +1,32 @@
+{
+  "name": "18-kill-child.kill",
+  "claudeVersion": "2.1.150 (Claude Code)",
+  "platform": "win32",
+  "args": [
+    "-p",
+    "Run this exact command with the Bash tool and wait for it to finish: node -e \"setTimeout(()=>{}, 120000)\" squadboard-spike-marker",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--permission-mode",
+    "acceptEdits",
+    "--allowedTools",
+    "Bash",
+    "--model",
+    "haiku",
+    "--strict-mcp-config",
+    "--max-budget-usd",
+    "0.50"
+  ],
+  "exitCode": null,
+  "signal": "SIGTERM",
+  "durationMs": 9946,
+  "timedOut": false,
+  "stderr": "",
+  "lineTimingsMs": [
+    745,
+    1614,
+    4910,
+    5281
+  ]
+}

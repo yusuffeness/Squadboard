@@ -1,0 +1,43 @@
+{
+  "name": "karar-strict-ambiguous-01",
+  "claudeVersion": "2.1.150 (Claude Code)",
+  "platform": "win32",
+  "args": [
+    "-p",
+    "Add persistence to this project so that results of add() are stored and can be listed later.",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--model",
+    "sonnet",
+    "--strict-mcp-config",
+    "--max-budget-usd",
+    "1.00",
+    "--append-system-prompt",
+    "You are the Backend agent of this project.\nBefore you modify ANY file, check whether the task leaves any of these unspecified:\n- storage technology or file format\n- adding a new dependency or library\n- public API shape or function names\n- data schema\n- behaviour visible to end users\nIf ANY of them is unspecified, you must NOT pick a default yourself and must NOT modify files.\nStop immediately and …",
+    "--permission-mode",
+    "acceptEdits",
+    "--allowedTools",
+    "Read,Edit,Write,Glob,Grep"
+  ],
+  "exitCode": 0,
+  "signal": null,
+  "durationMs": 12664,
+  "timedOut": false,
+  "stderr": "",
+  "lineTimingsMs": [
+    896,
+    1680,
+    2835,
+    3076,
+    3269,
+    3352,
+    5547,
+    5596,
+    5943,
+    5961,
+    10517,
+    12085,
+    12094
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "name": "13-perm-default",
+  "claudeVersion": "2.1.150 (Claude Code)",
+  "platform": "win32",
+  "args": [
+    "-p",
+    "Add an exported `subtract(a, b)` function to math.js. Then run `npm test` with the Bash tool and report its output. Do not ask me anything.",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--permission-mode",
+    "default",
+    "--model",
+    "haiku",
+    "--strict-mcp-config",
+    "--max-budget-usd",
+    "0.50"
+  ],
+  "exitCode": 0,
+  "signal": null,
+  "durationMs": 10001,
+  "timedOut": false,
+  "stderr": "",
+  "lineTimingsMs": [
+    805,
+    1558,
+    2122,
+    2544,
+    2552,
+    3698,
+    4253,
+    4260,
+    6310,
+    6909,
+    6937,
+    7141,
+    7150,
+    9062,
+    9395,
+    9415
+  ]
+}

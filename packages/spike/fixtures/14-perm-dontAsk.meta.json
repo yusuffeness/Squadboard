@@ -1,0 +1,42 @@
+{
+  "name": "14-perm-dontAsk",
+  "claudeVersion": "2.1.150 (Claude Code)",
+  "platform": "win32",
+  "args": [
+    "-p",
+    "Add an exported `subtract(a, b)` function to math.js. Then run `npm test` with the Bash tool and report its output. Do not ask me anything.",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--permission-mode",
+    "dontAsk",
+    "--allowedTools",
+    "Read,Edit",
+    "--model",
+    "haiku",
+    "--strict-mcp-config",
+    "--max-budget-usd",
+    "0.50"
+  ],
+  "exitCode": 0,
+  "signal": null,
+  "durationMs": 11036,
+  "timedOut": false,
+  "stderr": "",
+  "lineTimingsMs": [
+    821,
+    1544,
+    2345,
+    2795,
+    2804,
+    3974,
+    4493,
+    4524,
+    5709,
+    5936,
+    5952,
+    9358,
+    10437,
+    10450
+  ]
+}

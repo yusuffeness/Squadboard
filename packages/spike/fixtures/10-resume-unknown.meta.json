@@ -1,0 +1,24 @@
+{
+  "name": "10-resume-unknown",
+  "claudeVersion": "2.1.150 (Claude Code)",
+  "platform": "win32",
+  "args": [
+    "-p",
+    "hi",
+    "--resume",
+    "df228ef3-614c-4c8c-a226-c9ea429f38b1",
+    "--output-format",
+    "json",
+    "--model",
+    "haiku",
+    "--strict-mcp-config",
+    "--max-budget-usd",
+    "0.50"
+  ],
+  "exitCode": 1,
+  "signal": null,
+  "durationMs": 1940,
+  "timedOut": false,
+  "stderr": "No conversation found with session ID: df228ef3-614c-4c8c-a226-c9ea429f38b1\n",
+  "lineTimingsMs": []
+}

@@ -1,0 +1,15 @@
+{
+  "name": "@squadboard/spike",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Throwaway exploration of `claude -p` behaviour. Not product code.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "spike": "tsx src/run.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.15"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "name": "03-stream-verbose",
+  "claudeVersion": "2.1.150 (Claude Code)",
+  "platform": "win32",
+  "args": [
+    "-p",
+    "Read math.js and tell me in one sentence what it does.",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--model",
+    "haiku",
+    "--strict-mcp-config",
+    "--max-budget-usd",
+    "0.50"
+  ],
+  "exitCode": 0,
+  "signal": null,
+  "durationMs": 5801,
+  "timedOut": false,
+  "stderr": "",
+  "lineTimingsMs": [
+    889,
+    1795,
+    2190,
+    2337,
+    2389,
+    3524,
+    3944,
+    3952,
+    5118,
+    5219,
+    5225
+  ]
+}

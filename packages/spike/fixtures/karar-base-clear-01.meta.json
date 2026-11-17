@@ -1,0 +1,42 @@
+{
+  "name": "karar-clear-01",
+  "claudeVersion": "2.1.150 (Claude Code)",
+  "platform": "win32",
+  "args": [
+    "-p",
+    "Add an exported subtract(a, b) function to math.js that returns a - b.",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--model",
+    "sonnet",
+    "--strict-mcp-config",
+    "--max-budget-usd",
+    "1.00",
+    "--append-system-prompt",
+    "You are the Backend agent of this project.\nIf the task leaves an important choice open that the user should make (e.g. which library, which approach, a product decision),\nDO NOT guess and DO NOT modify any files. Stop immediately and end your final message with exactly one block in this format:\n\n```karar\n{\"question\": \"<one sentence question for the user>\", \"options\": [\"<option 1>\", \"<option 2>\", \"…",
+    "--permission-mode",
+    "acceptEdits",
+    "--allowedTools",
+    "Read,Edit,Write,Glob,Grep"
+  ],
+  "exitCode": 0,
+  "signal": null,
+  "durationMs": 9128,
+  "timedOut": false,
+  "stderr": "",
+  "lineTimingsMs": [
+    896,
+    1561,
+    2412,
+    2633,
+    2853,
+    2908,
+    4779,
+    4796,
+    6910,
+    6940,
+    8531,
+    8546
+  ]
+}
