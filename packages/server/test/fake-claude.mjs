@@ -27,6 +27,11 @@ const flag = (name) => {
 };
 const env = process.env;
 
+if (argv[0] === '--version') {
+  process.stdout.write('0.0.0-fake (Claude Code)\n');
+  process.exit(0);
+}
+
 if (env.FAKE_CLAUDE_ARGS_FILE) {
   writeFileSync(
     env.FAKE_CLAUDE_ARGS_FILE,

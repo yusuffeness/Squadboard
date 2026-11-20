@@ -1,5 +1,7 @@
 import {
   AppWindow,
+  Bot,
+  Code,
   Database,
   Eye,
   Flag,
@@ -8,6 +10,10 @@ import {
   Sparkles,
   type LucideIcon,
 } from 'lucide-react';
+import { useMemo } from 'react';
+import type { AgentView, TeamState } from '../api';
+import { useTeam } from './queries';
+import { useUi } from './store';
 
 export type NameMode = 'technical' | 'simple';
 
@@ -18,91 +24,94 @@ export interface AgentMeta {
   /** What the agent does, in one short line. */
   role: string;
   icon: LucideIcon;
-  /** Pastel fill (full class names so Tailwind can see them). */
-  bg: string;
-  /** Left edge of task cards. */
-  edge: string;
+  /** Pastel fill: a CSS colour, from `.team/team.json` or a design token for the fallback team. */
+  color: string;
+  enabled: boolean;
 }
 
-/** The team in the order the design shows it (agent strip, menus). */
-export const TEAM: readonly AgentMeta[] = [
-  {
-    id: 'planner',
-    technical: 'Planlayıcı',
-    simple: 'Kaptan',
-    role: 'Planlar, işi parçalara böler',
-    icon: Flag,
-    bg: 'bg-agent-planner',
-    edge: 'border-l-agent-planner',
-  },
-  {
-    id: 'frontend',
-    technical: 'Ön Yüz',
-    simple: 'Pixel',
-    role: 'Ekranları ve arayüzü yapar',
-    icon: AppWindow,
-    bg: 'bg-agent-frontend',
-    edge: 'border-l-agent-frontend',
-  },
-  {
-    id: 'backend',
-    technical: 'Arka Yüz',
-    simple: 'Motor',
-    role: 'Sunucu ve API yazar',
-    icon: Server,
-    bg: 'bg-agent-backend',
-    edge: 'border-l-agent-backend',
-  },
-  {
-    id: 'database',
-    technical: 'Veritabanı',
-    simple: 'Kutu',
-    role: 'Tabloları ve veriyi kurar',
-    icon: Database,
-    bg: 'bg-agent-database',
-    edge: 'border-l-agent-database',
-  },
-  {
-    id: 'test',
-    technical: 'Test',
-    simple: 'Dedektif',
-    role: 'Test yazar, hata arar',
-    icon: FlaskConical,
-    bg: 'bg-agent-test',
-    edge: 'border-l-agent-test',
-  },
-  {
-    id: 'reviewer',
-    technical: 'İnceleyici',
-    simple: 'Usta',
-    role: 'Biten işi inceler, özetler',
-    icon: Eye,
-    bg: 'bg-agent-reviewer',
-    edge: 'border-l-agent-reviewer',
-  },
-];
-
-/** Tasks created before roles existed (stage 5) use `general`; unknown agents fall back to it. */
-export const GENERAL_AGENT: AgentMeta = {
-  id: 'general',
-  technical: 'Genel',
-  simple: 'Genel',
-  role: 'Her işe bakar',
-  icon: Sparkles,
-  bg: 'bg-agent-general',
-  edge: 'border-l-agent-general',
+/** Roles get an icon by id; agents users add themselves get a generic one. */
+const ICONS: Record<string, LucideIcon> = {
+  planner: Flag,
+  frontend: AppWindow,
+  backend: Server,
+  database: Database,
+  test: FlaskConical,
+  reviewer: Eye,
+  developer: Code,
+  general: Sparkles,
 };
 
-/** Agents a task can be given by hand (planner and reviewer get work from the flow, later). */
-export const ASSIGNABLE: readonly AgentMeta[] = [
-  GENERAL_AGENT,
-  ...TEAM.filter((a) => a.id !== 'planner' && a.id !== 'reviewer'),
+/** Agents that get their work from the flow (plan, review), not from a hand-made task. */
+const FLOW_ROLES = new Set(['planner', 'reviewer']);
+
+const fallback = (id: string, technical: string, simple: string, role: string): AgentMeta => ({
+  id,
+  technical,
+  simple,
+  role,
+  icon: ICONS[id] ?? Bot,
+  color: `var(--color-agent-${id})`,
+  enabled: true,
+});
+
+/**
+ * Used only for a project without a (valid) `.team/`: the same six roles the full-stack template
+ * installs. Once a team is set up, names and colours come from its files.
+ */
+export const DEFAULT_TEAM: readonly AgentMeta[] = [
+  fallback('planner', 'Planlayıcı', 'Kaptan', 'Planlar, işi parçalara böler'),
+  fallback('frontend', 'Ön Yüz', 'Pixel', 'Ekranları ve arayüzü yapar'),
+  fallback('backend', 'Arka Yüz', 'Motor', 'Sunucu ve API yazar'),
+  fallback('database', 'Veritabanı', 'Kutu', 'Tabloları ve veriyi kurar'),
+  fallback('test', 'Test', 'Dedektif', 'Test yazar, hata arar'),
+  fallback('reviewer', 'İnceleyici', 'Usta', 'Biten işi inceler, özetler'),
 ];
 
-export function agentMeta(id: string): AgentMeta {
-  return TEAM.find((a) => a.id === id) ?? GENERAL_AGENT;
+/** Not part of any template: tasks without a role, and agents no longer in the team. */
+export const GENERAL_AGENT: AgentMeta = fallback('general', 'Genel', 'Genel', 'Her işe bakar');
+
+export function fromAgentView(agent: AgentView): AgentMeta {
+  return {
+    id: agent.id,
+    technical: agent.names.tech,
+    simple: agent.names.friendly,
+    role: agent.description,
+    icon: ICONS[agent.id] ?? Bot,
+    color: agent.color,
+    enabled: agent.enabled,
+  };
 }
 
 export function agentName(agent: AgentMeta, mode: NameMode): string {
   return mode === 'simple' ? agent.simple : agent.technical;
+}
+
+export interface Agents {
+  /** 'team' when `.team/` was read; 'default' otherwise. */
+  source: 'team' | 'default';
+  /** Switched-on members in the team's order (agent strip). */
+  team: readonly AgentMeta[];
+  /** Agents a task can be given by hand: Genel first, then the members without a flow role. */
+  assignable: readonly AgentMeta[];
+  byId: (id: string) => AgentMeta;
+}
+
+export function agentsFrom(state: TeamState | undefined): Agents {
+  const members = state?.status === 'ok' ? state.team.agents.map(fromAgentView) : [...DEFAULT_TEAM];
+  const enabled = members.filter((a) => a.enabled);
+  return {
+    source: state?.status === 'ok' ? 'team' : 'default',
+    team: enabled,
+    assignable: [GENERAL_AGENT, ...enabled.filter((a) => !FLOW_ROLES.has(a.id))],
+    // Old tasks may name an agent the team no longer has: keep a sensible look for them.
+    byId: (id) =>
+      members.find((a) => a.id === id) ?? DEFAULT_TEAM.find((a) => a.id === id) ?? GENERAL_AGENT,
+  };
+}
+
+/** The current project's agents (from its `.team/`, or the fallback team). */
+export function useAgents(): Agents {
+  const projectId = useUi((s) => s.projectId);
+  const team = useTeam(projectId);
+  return useMemo(() => agentsFrom(team.data), [team.data]);
 }

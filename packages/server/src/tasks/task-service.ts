@@ -7,36 +7,44 @@ import {
   createProject,
   createRequest,
   createTask,
+  deleteProject,
   findProjectByPath,
   getProject,
   getTaskWithContext,
   listDependents,
+  listProjectTasks,
   setTaskStatus,
+  updateProject,
   updateTask,
   type ProjectRow,
   type TaskRow,
 } from '../db/repository.js';
+import { explainGitError } from '../git/errors.js';
 import {
   changedFiles,
   commitAll,
   createWorktree,
+  detectMainBranch,
   getRepoInfo,
   removeWorktree,
 } from '../git/git.js';
 import { taskBranchName, worktreeFolderName } from '../git/naming.js';
 import type { AgentRunOptions } from '../runner/claude-cli.js';
 import type { RunHandle, RunOutcome, Runner } from '../runner/runner.js';
+import { ServiceError } from '../service-error.js';
+import { DEFAULT_TOOLS, TeamService } from '../team/team-service.js';
+
+export { ServiceError };
 
 /** `~/.squadboard/worktrees`, overridable with SQUADBOARD_WORKTREES. Never inside a user repo. */
 export function defaultWorktreesDir(): string {
   return process.env.SQUADBOARD_WORKTREES ?? join(homedir(), '.squadboard', 'worktrees');
 }
 
-const AGENT_TOOLS = ['Read', 'Edit', 'Write', 'Glob', 'Grep'];
-
 /**
- * Stage 5 agent: may read and edit files in its own worktree, no shell commands.
- * Real agents and their tool lists come from `.team/` templates later.
+ * Agent used when the project has no team (or the task's agent is not in it): may read and edit
+ * files in its own worktree, no shell commands. Agents defined in `.team/` bring their own tools,
+ * model, budget and prompt (TeamService.runConfig).
  *
  * `--allowedTools` alone is NOT a whitelist: other tools stay available, and Claude Code
  * auto-approves read-only shell commands such as `ls` (seen in the Stage 5 manual test).
@@ -45,21 +53,10 @@ const AGENT_TOOLS = ['Read', 'Edit', 'Write', 'Glob', 'Grep'];
  */
 export const DEFAULT_AGENT_OPTIONS: AgentRunOptions = {
   permissionMode: 'acceptEdits',
-  tools: AGENT_TOOLS,
-  allowedTools: AGENT_TOOLS,
+  tools: DEFAULT_TOOLS,
+  allowedTools: DEFAULT_TOOLS,
   maxBudgetUsd: 1,
 };
-
-/** An error the API turns into an HTTP status. */
-export class ServiceError extends Error {
-  constructor(
-    readonly status: 400 | 404 | 409,
-    message: string,
-  ) {
-    super(message);
-    this.name = 'ServiceError';
-  }
-}
 
 /** A dependency must be finished (and its work committed) before a dependent task starts. */
 const READY_DEPENDENCY: readonly TaskStatus[] = ['in_review', 'done'];
@@ -77,7 +74,9 @@ export interface TaskServiceOptions {
   db: Db;
   runner: Runner;
   worktreesDir?: string;
+  /** Used when the task's agent has no definition in the project's `.team/`. */
   agentOptions?: AgentRunOptions;
+  team?: TeamService;
 }
 
 /**
@@ -89,6 +88,7 @@ export class TaskService {
   private readonly runner: Runner;
   readonly worktreesDir: string;
   private readonly agentOptions: AgentRunOptions;
+  readonly team: TeamService;
   private readonly pending = new Set<Promise<unknown>>();
 
   constructor(options: TaskServiceOptions) {
@@ -96,36 +96,66 @@ export class TaskService {
     this.runner = options.runner;
     this.worktreesDir = canonicalDir(options.worktreesDir ?? defaultWorktreesDir());
     this.agentOptions = options.agentOptions ?? DEFAULT_AGENT_OPTIONS;
+    this.team = options.team ?? new TeamService();
   }
 
   // ---------- projects ----------
 
-  /** Registers a git repository (idempotent: the same repo returns the existing project). */
+  /**
+   * Registers a git repository (idempotent: the same repo returns the existing project).
+   * A repository without commits is accepted, so a team can be set up in a fresh repo; tasks
+   * can only start after the first commit (the UI warns).
+   */
   async addProject(path: string): Promise<ProjectRow> {
-    if (!isAbsolute(path)) throw new ServiceError(400, 'Path must be absolute');
-    if (!isDirectory(path)) throw new ServiceError(400, `Not a directory: ${path}`);
+    if (!isAbsolute(path)) {
+      throw new ServiceError(400, 'Klasörün tam yolunu yaz (ör. C:\\Users\\sen\\projem)');
+    }
+    if (!isDirectory(path)) throw new ServiceError(400, `Böyle bir klasör yok: ${path}`);
     const info = await getRepoInfo(path);
-    if (!info) throw new ServiceError(400, `Not a git repository: ${path}`);
-    if (!info.hasCommits) {
-      throw new ServiceError(400, 'The repository has no commits yet; make a first commit');
-    }
-    if (!info.branch) {
-      throw new ServiceError(400, 'HEAD is detached; check out a branch first');
-    }
+    if (!info) throw new ServiceError(400, `Bu klasör bir git deposu değil: ${path}`);
     if (isInside(info.root, this.worktreesDir)) {
-      throw new ServiceError(400, 'This is a Squadboard worktree, not a project');
+      throw new ServiceError(400, 'Bu bir Squadboard çalışma klasörü (worktree), proje değil');
     }
-    return (
-      findProjectByPath(this.db, info.root) ??
-      createProject(this.db, { path: info.root, mainBranch: info.branch })
+    const existing = findProjectByPath(this.db, info.root);
+    if (existing) return this.refreshMainBranch(existing);
+    const mainBranch = (await detectMainBranch(info.root, null)) ?? info.branch ?? 'main';
+    return createProject(this.db, { path: info.root, mainBranch });
+  }
+
+  /**
+   * Forgets a project: its tasks, runs and events go from Squadboard's database. The user's
+   * folder, branches and Squadboard's worktree folders are left as they are.
+   */
+  deleteProject(projectId: string): void {
+    if (!getProject(this.db, projectId)) throw new ServiceError(404, 'Proje bulunamadı');
+    const running = listProjectTasks(this.db, projectId).some((t) =>
+      this.runner.isTaskRunning(t.task.id),
     );
+    if (running) {
+      throw new ServiceError(409, 'Bu projede çalışan bir görev var. Önce durdur, sonra sil.');
+    }
+    deleteProject(this.db, projectId);
+  }
+
+  /**
+   * Detects the main branch again and stores it if it changed (a stored name can go stale, e.g.
+   * the repo uses `master` but `main` was stored). Keeps the stored one when the repository has
+   * no committed branch yet.
+   */
+  async refreshMainBranch(project: ProjectRow): Promise<ProjectRow> {
+    if (!existsSync(project.path)) return project;
+    const detected = await detectMainBranch(project.path, project.mainBranch);
+    if (!detected || detected === project.mainBranch) return project;
+    return updateProject(this.db, project.id, { mainBranch: detected });
   }
 
   // ---------- tasks ----------
 
-  createTask(projectId: string, input: CreateTaskInput): TaskRow {
+  async createTask(projectId: string, input: CreateTaskInput): Promise<TaskRow> {
     const project = getProject(this.db, projectId);
     if (!project) throw new ServiceError(404, 'Project not found');
+    // Record the branch this task will start from as it is now; checked again at start.
+    await this.refreshMainBranch(project);
     const title = input.title.trim();
     const prompt = input.prompt.trim();
     if (!title) throw new ServiceError(400, 'title is required');
@@ -165,6 +195,13 @@ export class TaskService {
     let task = ctx.task;
 
     if (this.runner.isTaskRunning(taskId)) throw new ServiceError(409, 'Task is already running');
+    const agentConfig = this.team.runConfig(project.path, task.agent);
+    if (agentConfig.status === 'disabled') {
+      throw new ServiceError(
+        409,
+        `${agentConfig.agent.names.tech} ekipte kapalı. Ekip sayfasından açıp tekrar dene.`,
+      );
+    }
     const dep = this.readyDependency(task);
     // readyDependency may have moved the task from blocked to planned.
     task = getTaskWithContext(this.db, taskId)?.task ?? task;
@@ -180,7 +217,8 @@ export class TaskService {
     const cwd = task.worktreePath;
     if (!cwd || !this.isManagedWorktree(cwd)) throw new ServiceError(409, 'Task has no worktree');
 
-    const handle = this.runner.start({ taskId, prompt: ctx.prompt, cwd, ...this.agentOptions });
+    const options = agentConfig.status === 'ok' ? agentConfig.options : this.agentOptions;
+    const handle = this.runner.start({ taskId, prompt: ctx.prompt, cwd, ...options });
     const done = handle.done.then((outcome) => this.afterRun(outcome));
     this.pending.add(done);
     void done.finally(() => this.pending.delete(done));
@@ -270,7 +308,18 @@ export class TaskService {
   ): Promise<TaskRow> {
     const branch = task.branch ?? taskBranchName(task.title, task.id);
     const path = join(this.worktreesDir, project.id, worktreeFolderName(branch));
-    const base = task.baseRef ?? dep?.branch ?? project.mainBranch;
+    let base = task.baseRef ?? dep?.branch ?? null;
+    if (!base) {
+      const main = await detectMainBranch(project.path, project.mainBranch);
+      if (!main) {
+        throw new ServiceError(
+          409,
+          "Depoda henüz commit yok. Görev başlatmadan önce ilk commit'i at.",
+        );
+      }
+      if (main !== project.mainBranch) updateProject(this.db, project.id, { mainBranch: main });
+      base = main;
+    }
     try {
       const wt = await createWorktree(project.path, { branch, path, base });
       return updateTask(this.db, task.id, {
@@ -281,8 +330,14 @@ export class TaskService {
         gitError: null,
       });
     } catch (err) {
-      updateTask(this.db, task.id, { gitError: (err as Error).message });
-      throw new ServiceError(409, `Could not create the worktree: ${(err as Error).message}`);
+      const raw = (err as Error).message;
+      updateTask(this.db, task.id, { gitError: raw });
+      const explained = explainGitError(raw);
+      throw new ServiceError(
+        409,
+        `Çalışma klasörü açılamadı. ${explained?.message ?? 'Git bir hata verdi.'}`,
+        { detail: raw },
+      );
     }
   }
 

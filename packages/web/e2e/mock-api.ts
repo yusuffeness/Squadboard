@@ -1,5 +1,14 @@
 import type { Page } from '@playwright/test';
-import type { ProjectView, RunView, TaskView } from '../src/api';
+import type {
+  AgentView,
+  ProjectChecks,
+  ProjectView,
+  RunView,
+  TaskView,
+  TeamState,
+  TeamView,
+  TemplateView,
+} from '../src/api';
 
 /** Shapes mirror packages/server routes; only what the UI reads matters. */
 const now = new Date();
@@ -10,6 +19,7 @@ export const PROJECT: ProjectView = {
   path: 'C:\\Users\\sen\\kafe-siparis',
   mainBranch: 'main',
   clean: true,
+  hasCommits: true,
   taskCount: 5,
   createdAt: iso(600),
 };
@@ -49,6 +59,7 @@ function task(id: string, over: Partial<TaskView>): TaskView {
     changedFiles: [],
     unexpectedFiles: [],
     gitError: null,
+    gitErrorDetail: null,
     createdAt: iso(60),
     active: false,
     latestRun: null,
@@ -135,21 +146,186 @@ const SSE_EVENTS = [
   { seq: 2, event: { kind: 'text', text: 'Sipariş sepeti için yeni bir bileşen yazıyorum.' } },
 ];
 
+const agent = (
+  id: string,
+  tech: string,
+  friendly: string,
+  color: string,
+  over: Partial<AgentView> = {},
+): AgentView => ({
+  id,
+  file: `${id}.md`,
+  names: { tech, friendly },
+  color,
+  owns: [],
+  enabled: true,
+  budgetUsd: 1,
+  description: `${tech} işi yapar`,
+  tools: ['Read', 'Edit', 'Write', 'Glob', 'Grep'],
+  model: 'sonnet',
+  permissionMode: null,
+  prompt: `Sen bu projenin ${tech} ajanısın.`,
+  readOnly: false,
+  ...over,
+});
+
+const READ_ONLY = { tools: ['Read', 'Glob', 'Grep'], readOnly: true, budgetUsd: 0.5 };
+const SETTINGS = {
+  concurrency: 3,
+  worktrees: true,
+  requirePlanApproval: true,
+  requireReview: true,
+};
+
+/** The full-stack template as the server lists it. */
+export const TEMPLATE: TemplateView = {
+  id: 'fullstack-web',
+  name: 'Full-stack web uygulaması',
+  description: 'Altı kişilik ekip.',
+  settings: SETTINGS,
+  files: ['.team/team.json'],
+  agents: [
+    agent('planner', 'Planlayıcı', 'Kaptan', '#9ED8E8', READ_ONLY),
+    agent('frontend', 'Ön Yüz', 'Pixel', '#FFB38A'),
+    agent('backend', 'Arka Yüz', 'Motor', '#8FB3FF'),
+    agent('database', 'Veritabanı', 'Kutu', '#86D3AE'),
+    agent('test', 'Test', 'Dedektif', '#C6A8F0'),
+    agent('reviewer', 'İnceleyici', 'Usta', '#F5D27A', READ_ONLY),
+  ],
+};
+
+export const MINIMAL: TemplateView = {
+  id: 'minimal',
+  name: 'Küçük ekip',
+  description: 'Üç kişilik ekip.',
+  settings: SETTINGS,
+  files: ['.team/team.json'],
+  agents: [
+    agent('planner', 'Planlayıcı', 'Kaptan', '#9ED8E8', READ_ONLY),
+    agent('developer', 'Geliştirici', 'Kalfa', '#FFB38A'),
+    agent('reviewer', 'İnceleyici', 'Usta', '#F5D27A', READ_ONLY),
+  ],
+};
+
+/** An installed team (from the template), as `GET /api/projects/:id/team` returns it. */
+export function teamOf(template: TemplateView, over: Partial<TeamView> = {}): TeamState {
+  const team: TeamView = {
+    id: template.id,
+    name: template.name,
+    description: template.description,
+    settings: template.settings,
+    agents: template.agents,
+  };
+  return { status: 'ok', team: { ...structuredClone(team), ...over } };
+}
+
+export const CHECKS: ProjectChecks = {
+  path: PROJECT.path,
+  isRepo: true,
+  mainBranch: 'main',
+  hasCommits: true,
+  changes: 0,
+  claude: { ok: true, version: '2.1.150' },
+};
+
 export interface MockOptions {
   projects?: ProjectView[];
   tasks?: TaskView[];
+  /** Default: the full-stack team is installed. */
+  team?: TeamState;
+  checks?: ProjectChecks;
+  /** Files the install reports as existing with other content (409 until overwrite). */
+  conflicts?: string[];
+}
+
+/** What the page sent, for assertions. */
+export interface MockLog {
+  installs: unknown[];
+  agentPatches: { agentId: string; body: unknown }[];
+  settingsPatches: unknown[];
+  deleted: string[];
 }
 
 /** Answers every API call in the page. Unknown calls fail loudly so tests notice. */
-export async function mockApi(page: Page, opts: MockOptions = {}) {
-  const projects = opts.projects ?? [PROJECT];
+export async function mockApi(page: Page, opts: MockOptions = {}): Promise<MockLog> {
+  let projects = opts.projects ?? [PROJECT];
   const tasks = opts.tasks ?? TASKS;
+  let team: TeamState = opts.team ?? teamOf(TEMPLATE);
+  const log: MockLog = { installs: [], agentPatches: [], settingsPatches: [], deleted: [] };
 
   await page.route('**/health', (r) => r.fulfill({ json: { status: 'ok' } }));
   await page.route('**/api/**', (route) => {
-    const url = new URL(route.request().url());
+    const request = route.request();
+    const url = new URL(request.url());
     const path = url.pathname;
+    const method = request.method();
+    const body = (): Record<string, unknown> =>
+      (request.postDataJSON() as Record<string, unknown> | null) ?? {};
+
     if (path === '/api/projects') return route.fulfill({ json: { projects } });
+    const del = /^\/api\/projects\/([^/]+)$/.exec(path);
+    if (del && method === 'DELETE') {
+      log.deleted.push(del[1] ?? '');
+      projects = projects.filter((p) => p.id !== del[1]);
+      return route.fulfill({ status: 204, body: '' });
+    }
+    if (path === '/api/templates')
+      return route.fulfill({ json: { templates: [TEMPLATE, MINIMAL] } });
+    if (/^\/api\/projects\/[^/]+\/team$/.test(path)) return route.fulfill({ json: team });
+    if (/^\/api\/projects\/[^/]+\/checks$/.test(path)) {
+      return route.fulfill({ json: opts.checks ?? CHECKS });
+    }
+    if (/\/team\/install$/.test(path)) {
+      const input = body();
+      log.installs.push(input);
+      const conflicts = opts.conflicts ?? [];
+      if (conflicts.length > 0 && input.overwrite !== true) {
+        return route.fulfill({
+          status: 409,
+          json: { error: 'Bu dosyalar zaten var. Üzerine yazılsın mı?', conflicts },
+        });
+      }
+      const template = input.templateId === 'minimal' ? MINIMAL : TEMPLATE;
+      const on = (input.agents as string[] | undefined) ?? template.agents.map((a) => a.id);
+      team = teamOf(template, {
+        agents: template.agents.map((a) => ({ ...a, enabled: on.includes(a.id) })),
+      });
+      return route.fulfill({
+        status: 201,
+        json: {
+          written: ['.team/team.json', '.claude/agents/planner.md'],
+          unchanged: [],
+          state: team,
+        },
+      });
+    }
+    const agentPatch = /\/team\/agents\/([^/]+)$/.exec(path);
+    if (agentPatch && method === 'PATCH' && team.status === 'ok') {
+      const patch = body() as {
+        enabled?: boolean;
+        names?: Partial<AgentView['names']>;
+        prompt?: string;
+        model?: string | null;
+      };
+      log.agentPatches.push({ agentId: agentPatch[1] ?? '', body: patch });
+      team.team.agents = team.team.agents.map((a) =>
+        a.id === agentPatch[1]
+          ? {
+              ...a,
+              ...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),
+              ...(patch.prompt !== undefined ? { prompt: patch.prompt } : {}),
+              ...(patch.model !== undefined ? { model: patch.model } : {}),
+              names: { ...a.names, ...patch.names },
+            }
+          : a,
+      );
+      return route.fulfill({ json: team.team });
+    }
+    if (/\/team\/settings$/.test(path) && method === 'PATCH' && team.status === 'ok') {
+      log.settingsPatches.push(body());
+      team.team.settings = { ...team.team.settings, ...body() };
+      return route.fulfill({ json: team.team });
+    }
     if (/^\/api\/projects\/[^/]+\/tasks$/.test(path)) return route.fulfill({ json: { tasks } });
     if (path === '/api/runs') return route.fulfill({ json: { runs: RUNS } });
     if (/^\/api\/runs\/[^/]+\/events$/.test(path)) {
@@ -163,8 +339,9 @@ export async function mockApi(page: Page, opts: MockOptions = {}) {
         body: `retry: 600000\n\n${body}`,
       });
     }
-    return route.fulfill({ status: 404, json: { error: `not mocked: ${path}` } });
+    return route.fulfill({ status: 404, json: { error: `not mocked: ${method} ${path}` } });
   });
+  return log;
 }
 
 export const BOARD_URL = '/#token=test-token';

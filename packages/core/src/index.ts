@@ -7,3 +7,4 @@ export * from './agent-event.js';
 export * from './claude-adapter.js';
 export * from './karar.js';
 export * from './plan.js';
+export * from './team.js';

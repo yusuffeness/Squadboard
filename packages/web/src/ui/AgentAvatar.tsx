@@ -19,7 +19,8 @@ export function AgentAvatar({
   return (
     <span
       aria-hidden
-      className={`inline-flex shrink-0 items-center justify-center text-ink ${agent.bg} ${SIZE[size].box}`}
+      style={{ backgroundColor: agent.color }}
+      className={`inline-flex shrink-0 items-center justify-center text-ink ${SIZE[size].box}`}
     >
       <Icon className={SIZE[size].icon} strokeWidth={2} />
     </span>

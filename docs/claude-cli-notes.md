@@ -258,3 +258,33 @@ CLI davranışının arayüze yansıyan kısımları:
 - **Maliyet yalnızca `result` ile gelir.** `costUsd` run bitene kadar `null`; "Bugün" hapı yalnızca bugün başlayan ve maliyeti bilinen run'ları toplar, tahmin göstermez.
 - **Canlı güncelleme yoklamasız.** Etkin her run için tek bir `EventSource` açılır (birden çok bileşen aynı akışı paylaşır). `end` olayında görev ve run listeleri yenilenir; commit `end`'den hemen sonra yazıldığı için 1,5 sn sonra bir kez daha yenilenir. Aşama 5'teki 2 sn'lik görev yoklaması kaldırıldı; yalnızca menüdeki bağlantı kartı 30 sn'de bir `/health` soruyor.
 - **Olayların zaman damgası yok.** SSE olayı `seq` ve `AgentEvent` taşır; log panelindeki satırlarda tasarımdaki saat sütunu bu yüzden gösterilmiyor.
+
+## 15. Ajan tanımları worktree'de görünüyor mu? (Aşama 7)
+
+Soru: ajan tanımı kullanıcının ana klasöründe `.claude/agents/` altında **commit'lenmemiş** duruyorsa, worktree'de çalışan `claude -p` onu görüyor mu?
+
+Deney (Claude Code 2.1.150, haiku, `--tools ""`, `--max-turns 1`, toplam ~0,02 $): geçici bir repo, tek boş commit; `.claude/agents/sb-probe.md` yalnızca ana klasörde, commit'siz ("cevabının sonuna `[probe-ok]` yaz" talimatıyla). Worktree, Squadboard'daki gibi repodan tamamen ayrı bir klasörde açıldı; worktree'de `.claude/` yok.
+
+| Durum                                                               | `init.agents` içinde         | Talimat uygulandı                     |
+| ------------------------------------------------------------------- | ---------------------------- | ------------------------------------- |
+| Worktree, `--agent sb-probe`                                        | ✅ `sb-probe`                | ✅                                    |
+| Worktree, bayraksız                                                 | ✅ (alt ajan olarak listede) | –                                     |
+| Worktree, `--agents '<json>' --agent sb-json`                       | ✅ ikisi de                  | ✅                                    |
+| Worktree, `--append-system-prompt "<talimat>"`                      | –                            | ✅                                    |
+| Dosya ana klasörden silindikten sonra, worktree, `--agent sb-probe` | ❌                           | ❌, **hata yok**, sessizce varsayılan |
+
+Bulgular:
+
+- **Evet, görüyor.** Claude Code worktree'de, worktree'nin bağlı olduğu ana çalışma klasörünün `.claude/agents/` dizinini (commit'lenmemiş hâliyle, canlı) okuyor. Bu belgelenmiş bir davranış değil; git worktree tespitine dayanıyor.
+- `--agent` ile verilen ad bulunamazsa CLI hata vermiyor, ajan tanımı olmadan çalışıyor. Yanlış ajanla sessizce çalışmak tehlikeli.
+- `--agent` ajan talimatını Claude Code'un kendi sistem prompt'unun **yerine** koyuyor gibi: aynı istek `--agent` ile ~0,001 $, `--append-system-prompt` ile ~0,009 $ tuttu (ikincisi Claude Code'un araç kullanım talimatlarını da taşıyor).
+
+**Seçilen yol:** sunucu tanımı kullanıcının klasöründen kendisi okur, doğrular ve açık bayraklarla geçer: `--append-system-prompt <talimat>`, `--tools`, `--allowedTools`, `--model`, `--max-budget-usd`, `--permission-mode`. Nedenleri:
+
+1. Belgelenmemiş worktree davranışına bağlı kalmıyor; Claude Code sürümü değişse de aynı çalışır.
+2. Tanım bozuksa ya da yoksa bunu Squadboard bilir ve söyler; CLI gibi sessizce varsayılana düşmez.
+3. Araç kısıtı `--tools` ile gerçekten uygulanır (İnceleyici salt okunur), bütçe ve model her run'da açık.
+4. Claude Code'un kendi sistem prompt'u (araç kullanımı, dosya düzenleme kuralları) korunur; ajan talimatı ona eklenir.
+5. Sahte CLI ile test edilebilir: testler `claude`'a giden argümanlara bakar.
+
+Not: proje ajanları worktree'de alt ajan olarak da listeleniyor (`init.agents`). Squadboard'ın ajanlarında alt ajan çağıran araç (`Task`/`Agent`) `--tools` listesinde olmadığı için kullanılamıyorlar.

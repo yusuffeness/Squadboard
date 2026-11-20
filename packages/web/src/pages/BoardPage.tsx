@@ -1,10 +1,10 @@
-import { FolderGit2, RotateCcw } from 'lucide-react';
-import { useEffect } from 'react';
+import { FolderGit2, RotateCcw, Users } from 'lucide-react';
 import { AddProjectForm } from '../components/AddProjectForm';
 import { NewTaskDialog } from '../components/NewTaskDialog';
-import { useProjects, useTasks } from '../lib/queries';
+import { useTasks, useTeam } from '../lib/queries';
 import { navigate, useRoute } from '../lib/router';
 import { useUi } from '../lib/store';
+import { useCurrentProject } from '../lib/use-project';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { Notice } from '../ui/Notice';
@@ -16,20 +16,10 @@ import { TaskDetail } from './TaskDetail';
 
 /** Pano (v2-01, v2-02, v2-04): welcome, agent strip, four columns, or one task's detail. */
 export function BoardPage() {
-  const projects = useProjects();
-  const projectId = useUi((s) => s.projectId);
-  const setProjectId = useUi((s) => s.setProjectId);
+  const { projects, project } = useCurrentProject();
   const route = useRoute();
-
-  // Keep the selection valid: first project when none (or a deleted one) is selected.
-  const list = projects.data;
-  useEffect(() => {
-    if (!list) return;
-    if (!list.some((p) => p.id === projectId)) setProjectId(list[0]?.id ?? null);
-  }, [list, projectId, setProjectId]);
-
-  const project = list?.find((p) => p.id === projectId) ?? null;
   const tasks = useTasks(project?.id ?? null);
+  const team = useTeam(project?.id ?? null);
 
   if (projects.isPending) return <BoardSkeleton />;
   if (projects.isError)
@@ -52,9 +42,35 @@ export function BoardPage() {
 
   return (
     <div className="flex flex-col gap-6 lg:gap-8">
-      {project.clean === false && (
+      {!project.hasCommits && (
+        <Notice tone="warn">
+          Bu depoda henüz commit yok. Ekibini kurabilir, görev ekleyebilirsin; görevler ilk
+          commit'ten sonra başlar.
+        </Notice>
+      )}
+      {project.clean === false && project.hasCommits && (
         <Notice tone="warn">
           Projende kaydedilmemiş değişiklikler var. Ajanlar yalnızca commit'lenmiş hâli görür.
+        </Notice>
+      )}
+      {team.data?.status === 'invalid' && (
+        <Notice
+          tone="warn"
+          action={<Button onClick={() => navigate({ page: 'ekip', task: null })}>Ekibe git</Button>}
+        >
+          Ekip dosyaları okunamadı, varsayılan ekip gösteriliyor. {team.data.error}
+        </Notice>
+      )}
+      {team.data?.status === 'missing' && (
+        <Notice
+          tone="warn"
+          action={
+            <Button icon={Users} onClick={() => navigate({ page: 'ekip', task: null })}>
+              Ekibini kur
+            </Button>
+          }
+        >
+          Bu projede henüz ekip kurulmamış. Şimdilik varsayılan ekip görünüyor.
         </Notice>
       )}
 

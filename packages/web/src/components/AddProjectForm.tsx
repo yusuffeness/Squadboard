@@ -3,6 +3,7 @@ import { useId, useState, type FormEvent } from 'react';
 import type { ProjectView } from '../api';
 import { useAddProject } from '../lib/queries';
 import { Button } from '../ui/Button';
+import { ErrorMessage } from '../ui/ErrorMessage';
 
 /** Folder path field + "Ekle". The server checks it is a git repository. */
 export function AddProjectForm({ onAdded }: { onAdded: (project: ProjectView) => void }) {
@@ -44,9 +45,9 @@ export function AddProjectForm({ onAdded }: { onAdded: (project: ProjectView) =>
         </Button>
       </div>
       {add.isError && (
-        <p id={`${id}-error`} role="alert" className="text-sm font-semibold text-danger">
-          Eklenemedi: {add.error.message}
-        </p>
+        <div id={`${id}-error`}>
+          <ErrorMessage error={add.error} prefix="Eklenemedi:" className="text-sm" />
+        </div>
       )}
     </form>
   );

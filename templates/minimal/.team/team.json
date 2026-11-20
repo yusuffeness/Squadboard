@@ -1,0 +1,49 @@
+{
+  "id": "minimal",
+  "name": "Küçük ekip",
+  "description": "Planlayıcı, tek bir geliştirici ve inceleyici. Küçük projeler ve hızlı düzeltmeler için.",
+  "agents": [
+    {
+      "id": "planner",
+      "file": "planner.md",
+      "names": {
+        "tech": "Planlayıcı",
+        "friendly": "Kaptan"
+      },
+      "color": "#9ED8E8",
+      "owns": [],
+      "enabled": true,
+      "budgetUsd": 0.5
+    },
+    {
+      "id": "developer",
+      "file": "developer.md",
+      "names": {
+        "tech": "Geliştirici",
+        "friendly": "Kalfa"
+      },
+      "color": "#FFB38A",
+      "owns": ["**"],
+      "enabled": true,
+      "budgetUsd": 1
+    },
+    {
+      "id": "reviewer",
+      "file": "reviewer.md",
+      "names": {
+        "tech": "İnceleyici",
+        "friendly": "Usta"
+      },
+      "color": "#F5D27A",
+      "owns": [],
+      "enabled": true,
+      "budgetUsd": 0.5
+    }
+  ],
+  "settings": {
+    "concurrency": 3,
+    "worktrees": true,
+    "requirePlanApproval": true,
+    "requireReview": true
+  }
+}

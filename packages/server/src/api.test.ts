@@ -63,14 +63,14 @@ afterEach(async () => {
   }
 });
 
-async function api<T>(method: 'GET' | 'POST', url: string, payload?: object) {
+async function api<T>(method: 'GET' | 'POST' | 'PATCH' | 'DELETE', url: string, payload?: object) {
   const res = await app.inject({
     method,
     url,
     headers: auth,
     ...(payload ? { payload } : {}),
   });
-  return { status: res.statusCode, body: res.json<T>() };
+  return { status: res.statusCode, body: (res.body ? res.json<T>() : undefined) as T };
 }
 
 async function addProject(path: string) {
@@ -200,7 +200,8 @@ describe('projects and tasks API', () => {
 
   it('validates input with clear errors', async () => {
     const r = setup();
-    expect((await addProject('relative')).body).toEqual({ error: 'Path must be absolute' });
+    const relative = await api<{ error: string }>('POST', '/api/projects', { path: 'relative' });
+    expect(relative.body.error).toMatch(/^Klasörün tam yolunu yaz/);
     expect((await addProject(r.dir)).status).toBe(400); // not a git repo
     const project = (await addProject(r.repo)).body;
     const noTitle = await api('POST', `/api/projects/${project.id}/tasks`, { prompt: 'x' });
@@ -326,5 +327,71 @@ describe('runs API (watching)', () => {
     ] as const) {
       expect((await app.inject({ method, url, headers: auth })).statusCode, url).toBe(404);
     }
+  });
+});
+
+describe('team API', () => {
+  it('lists templates, installs one, reports conflicts and saves agent edits', async () => {
+    const r = setup();
+    const project = (await addProject(r.repo)).body;
+    const templates = await api<{ templates: { id: string }[] }>('GET', '/api/templates');
+    expect(templates.body.templates.map((x) => x.id)).toContain('fullstack-web');
+    expect((await api('GET', `/api/projects/${project.id}/team`)).body).toEqual({
+      status: 'missing',
+    });
+
+    const url = `/api/projects/${project.id}/team/install`;
+    const installed = await api<{ written: string[] }>('POST', url, { templateId: 'minimal' });
+    expect(installed.status).toBe(201);
+    expect(installed.body.written).toContain('.team/team.json');
+    // The team files are the only change in the user's checkout (left for the user to commit).
+    before = { ...before, status: snapshotUserRepo(r.repo).status };
+    expect(before.status).toMatch(/^\?\? \.claude\/[\s\S]*\?\? \.team\/team\.json$/);
+
+    const again = await api<{ written: string[] }>('POST', url, { templateId: 'minimal' });
+    expect(again.body.written).toEqual([]);
+    const other = await api<{ error: string; conflicts: string[] }>('POST', url, {
+      templateId: 'fullstack-web',
+    });
+    expect(other.status).toBe(409);
+    expect(other.body.conflicts).toContain('.team/team.json');
+    expect(other.body.error).toMatch(/Üzerine yazılsın mı/);
+
+    const saved = await api<{ agents: { id: string; model: string | null }[] }>(
+      'PATCH',
+      `/api/projects/${project.id}/team/agents/developer`,
+      { model: 'haiku' },
+    );
+    expect(saved.body.agents.find((a) => a.id === 'developer')?.model).toBe('haiku');
+    before = { ...before, status: snapshotUserRepo(r.repo).status };
+
+    const bad = await api<{ error: string }>('PATCH', `/api/projects/${project.id}/team/settings`, {
+      concurrency: 0,
+    });
+    expect(bad.status).toBe(400);
+  });
+
+  it('shows the setup checklist', async () => {
+    const r = setup();
+    const project = (await addProject(r.repo)).body;
+    const checks = await api('GET', `/api/projects/${project.id}/checks`);
+    expect(checks.body).toEqual({
+      path: r.repo,
+      isRepo: true,
+      mainBranch: 'main',
+      hasCommits: true,
+      changes: 0,
+      claude: { ok: true, version: '0.0.0' },
+    });
+  });
+
+  it('deletes a project from Squadboard only', async () => {
+    const r = setup();
+    const project = (await addProject(r.repo)).body;
+    expect((await api('DELETE', `/api/projects/${project.id}`)).status).toBe(204);
+    const list = await api<{ projects: ProjectView[] }>('GET', '/api/projects');
+    expect(list.body.projects).toEqual([]);
+    expect(existsSync(join(r.repo, 'README.md'))).toBe(true);
+    expect((await api('DELETE', `/api/projects/${project.id}`)).status).toBe(404);
   });
 });

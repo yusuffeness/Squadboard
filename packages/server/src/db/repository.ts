@@ -293,6 +293,22 @@ export function listProjects(db: Db): ProjectRow[] {
   return db.select().from(projects).orderBy(asc(projects.createdAt)).all();
 }
 
+export function updateProject(
+  db: Db,
+  id: string,
+  patch: Partial<Omit<ProjectRow, 'id' | 'path' | 'createdAt'>>,
+): ProjectRow {
+  return db.update(projects).set(patch).where(eq(projects.id, id)).returning().get();
+}
+
+/**
+ * Removes the project and, through ON DELETE CASCADE, its requests, tasks, runs, events,
+ * decisions and reviews. Only Squadboard's own records: nothing on disk is touched.
+ */
+export function deleteProject(db: Db, id: string): void {
+  db.delete(projects).where(eq(projects.id, id)).run();
+}
+
 export function updateTask(
   db: Db,
   id: string,

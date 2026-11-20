@@ -5,6 +5,7 @@ import { ZodError } from 'zod';
 import type { Db } from './db/index.js';
 import { registerProjectRoutes } from './routes/projects.js';
 import { registerRunRoutes } from './routes/runs.js';
+import { registerTeamRoutes } from './routes/team.js';
 import type { Runner } from './runner/runner.js';
 import { redactToken, registerSecurity, type SecurityOptions } from './security.js';
 import { ServiceError, type TaskService } from './tasks/task-service.js';
@@ -43,8 +44,13 @@ export function buildApp(options: AppOptions): FastifyInstance {
 
   // Expected failures become clean JSON errors: { error: "…" }.
   app.setErrorHandler((error, _request, reply) => {
-    if (error instanceof ServiceError)
-      return reply.code(error.status).send({ error: error.message });
+    if (error instanceof ServiceError) {
+      return reply.code(error.status).send({
+        ...error.extra,
+        error: error.message,
+        ...(error.detail ? { detail: error.detail } : {}),
+      });
+    }
     if (error instanceof ZodError) {
       return reply.code(400).send({ error: error.issues[0]?.message ?? 'Invalid request' });
     }
@@ -59,6 +65,12 @@ export function buildApp(options: AppOptions): FastifyInstance {
   app.get('/health', async (): Promise<HealthResponse> => ({ status: 'ok' }));
   registerRunRoutes(app, { db: options.db, runner: options.runner });
   registerProjectRoutes(app, { db: options.db, runner: options.runner, tasks: options.tasks });
+  registerTeamRoutes(app, {
+    db: options.db,
+    runner: options.runner,
+    tasks: options.tasks,
+    team: options.tasks.team,
+  });
 
   if (options.webDir && existsSync(options.webDir)) {
     // The page itself holds no secrets; it reads the token from the URL fragment.

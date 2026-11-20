@@ -130,6 +130,30 @@ export class Runner extends EventEmitter<RunnerEventMap> {
     this.stopGraceMs = options.stopGraceMs ?? 3000;
   }
 
+  /**
+   * `claude --version` (e.g. "2.1.150"), or null when the CLI is missing or does not answer.
+   * Free: no model call. Cached for a minute since the setup screen asks on every visit.
+   */
+  async cliVersion(): Promise<string | null> {
+    if (this.versionCache && Date.now() - this.versionCache.at < 60_000) {
+      return this.versionCache.value;
+    }
+    const result = await execa(this.claude.file, [...this.claude.args, '--version'], {
+      env: this.env,
+      extendEnv: false,
+      stdin: 'ignore',
+      reject: false,
+      timeout: 10_000,
+      windowsHide: true,
+    }).catch(() => null);
+    const out = result && result.exitCode === 0 ? String(result.stdout) : '';
+    const value = /\d+\.\d+(?:\.\d+)?/.exec(out)?.[0] ?? null;
+    this.versionCache = { at: Date.now(), value };
+    return value;
+  }
+
+  private versionCache: { at: number; value: string | null } | null = null;
+
   /** Starts a new session for a task (task must be allowed to move to `running`). */
   start(input: StartRunInput): RunHandle {
     const { taskId, prompt, cwd, ...options } = input;

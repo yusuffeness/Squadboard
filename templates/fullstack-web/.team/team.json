@@ -1,0 +1,85 @@
+{
+  "id": "fullstack-web",
+  "name": "Full-stack web uygulaması",
+  "description": "Planlayıcı, ön yüz, arka yüz, veritabanı, test ve inceleyiciden oluşan altı kişilik ekip.",
+  "agents": [
+    {
+      "id": "planner",
+      "file": "planner.md",
+      "names": {
+        "tech": "Planlayıcı",
+        "friendly": "Kaptan"
+      },
+      "color": "#9ED8E8",
+      "owns": [],
+      "enabled": true,
+      "budgetUsd": 0.5
+    },
+    {
+      "id": "frontend",
+      "file": "frontend.md",
+      "names": {
+        "tech": "Ön Yüz",
+        "friendly": "Pixel"
+      },
+      "color": "#FFB38A",
+      "owns": ["src/components/**", "src/pages/**", "src/app/**", "src/styles/**", "public/**"],
+      "enabled": true,
+      "budgetUsd": 1
+    },
+    {
+      "id": "backend",
+      "file": "backend.md",
+      "names": {
+        "tech": "Arka Yüz",
+        "friendly": "Motor"
+      },
+      "color": "#8FB3FF",
+      "owns": ["src/api/**", "src/server/**", "src/routes/**", "src/services/**"],
+      "enabled": true,
+      "budgetUsd": 1
+    },
+    {
+      "id": "database",
+      "file": "database.md",
+      "names": {
+        "tech": "Veritabanı",
+        "friendly": "Kutu"
+      },
+      "color": "#86D3AE",
+      "owns": ["src/db/**", "migrations/**", "prisma/**", "drizzle/**", "seeds/**"],
+      "enabled": true,
+      "budgetUsd": 1
+    },
+    {
+      "id": "test",
+      "file": "test.md",
+      "names": {
+        "tech": "Test",
+        "friendly": "Dedektif"
+      },
+      "color": "#C6A8F0",
+      "owns": ["tests/**", "e2e/**", "**/*.test.*", "**/*.spec.*"],
+      "enabled": true,
+      "budgetUsd": 1
+    },
+    {
+      "id": "reviewer",
+      "file": "reviewer.md",
+      "names": {
+        "tech": "İnceleyici",
+        "friendly": "Usta"
+      },
+      "color": "#F5D27A",
+      "owns": [],
+      "enabled": true,
+      "budgetUsd": 0.5
+    }
+  ],
+  "settings": {
+    "concurrency": 3,
+    "worktrees": true,
+    "requirePlanApproval": true,
+    "requireReview": true
+  }
+}

@@ -20,8 +20,8 @@ Teknik tasarım: `docs/ARCHITECTURE.md`. Her işe onu okuyarak başla.
 - Kod, yorum ve tanımlayıcılar İngilizce.
 - Sunucu yalnızca `127.0.0.1`'e bağlanır. `--dangerously-skip-permissions` asla kullanılmaz.
 - Yeni `/api` uç noktaları `security.ts` hook'unun arkasında kalır (Host, Origin, token); güvenliği atlayan bir yol açma, token'ı loglama.
-- Kullanıcının reposunda çalışma ağacına ve ana dalına asla dokunulmaz: ajanlar yalnızca `~/.squadboard/worktrees/` altındaki worktree'lerde çalışır; git servisi yalnızca `team/` dallarında oluşturur, commit'ler, siler. Git testleri her senaryodan sonra kullanıcı reposunun değişmediğini doğrular; yeni git kodu da bunu yapmalı.
-- web, core'dan yalnızca `import type` ile tip alır (`tsconfig` `paths` → `core/src`); çalışma zamanında core'a bağlı değildir.
+- Kullanıcının reposunda çalışma ağacına ve ana dalına asla dokunulmaz: ajanlar yalnızca `~/.squadboard/worktrees/` altındaki worktree'lerde çalışır; git servisi yalnızca `team/` dallarında oluşturur, commit'ler, siler. Git testleri her senaryodan sonra kullanıcı reposunun değişmediğini doğrular; yeni git kodu da bunu yapmalı. Tek istisna kullanıcının açıkça istediği ekip kurulumu: yalnızca `.team/team.json` ve `.claude/agents/*.md` yazılır, asla commit'lenmez.
+- web, core'dan yalnızca `import type` ile tip alır (`tsconfig` `paths` → `core/src`); çalışma zamanında core'a bağlı değildir. Core'daki bir sabit (ör. `AGENT_MODELS`) web'de gerekiyorsa web'de tekrar tanımlanır, tipi `typeof` ile core'a bağlanır; değer import edilirse Vite sayfayı açamaz.
 - Renk ve font için Tailwind token'larını kullan (`bg-bg`, `text-ink`, `text-accent`, `text-success`, `text-warn`, `font-sans`, `font-mono`); ham hex yazma. Token'lar `packages/web/src/index.css` içindeki `@theme` bloğunda.
 
 ## Test

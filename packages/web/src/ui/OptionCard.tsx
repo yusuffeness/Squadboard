@@ -2,8 +2,9 @@ import { Check, type LucideIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 /**
- * Big selectable tile with an icon (v2-19 "Seçenek kartları"). Use inside an element with
- * `role="radiogroup"`; the selected one gets a coral border and a tick.
+ * Big selectable tile with an icon (v2-19 "Seçenek kartları", v2-07 team members). As a radio,
+ * use it inside `role="radiogroup"`; as a checkbox, inside a labelled group. The selected one gets
+ * a coral border and a tick.
  */
 export function OptionCard({
   icon: Icon,
@@ -13,6 +14,7 @@ export function OptionCard({
   onSelect,
   disabled = false,
   leading,
+  role = 'radio',
 }: {
   icon?: LucideIcon;
   label: string;
@@ -22,11 +24,12 @@ export function OptionCard({
   disabled?: boolean;
   /** Custom visual instead of the icon tile (an agent avatar). */
   leading?: ReactNode;
+  role?: 'radio' | 'checkbox';
 }) {
   return (
     <button
       type="button"
-      role="radio"
+      role={role}
       aria-checked={selected}
       disabled={disabled}
       onClick={onSelect}

@@ -97,6 +97,40 @@ export async function resolveCommit(repo: string, ref: string): Promise<string> 
   return (await git(repo, ['rev-parse', '--verify', `${ref}^{commit}`])).stdout.trim();
 }
 
+/**
+ * The branch new tasks start from, detected fresh every time (a stored name can go stale: the
+ * user renames `master` to `main`, or the project was registered with a guess). In order:
+ * the stored branch if it still exists, the remote's default branch (`origin/HEAD`), the
+ * checked-out branch, then `main` / `master`. Only branches that have a commit count.
+ * Returns null when the repository has no branch with a commit at all.
+ */
+export async function detectMainBranch(
+  repo: string,
+  stored: string | null,
+): Promise<string | null> {
+  const candidates: string[] = [];
+  if (stored) candidates.push(stored);
+  const remote = await git(
+    repo,
+    ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'],
+    true,
+  );
+  if (remote.ok) candidates.push(remote.stdout.trim().replace(/^origin\//, ''));
+  const current = await git(repo, ['symbolic-ref', '--quiet', '--short', 'HEAD'], true);
+  if (current.ok) candidates.push(current.stdout.trim());
+  candidates.push('main', 'master');
+  for (const branch of new Set(candidates.filter(Boolean))) {
+    if (await branchExists(repo, branch)) return branch;
+  }
+  return null;
+}
+
+/** Number of changed, staged or untracked entries in the user's checkout. */
+export async function countChanges(dir: string): Promise<number> {
+  const status = await git(dir, ['status', '--porcelain']);
+  return status.stdout.split(/\r?\n/).filter((l) => l.trim() !== '').length;
+}
+
 export async function isValidBranchName(repo: string, branch: string): Promise<boolean> {
   return (await git(repo, ['check-ref-format', '--branch', branch], true)).ok;
 }

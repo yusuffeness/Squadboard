@@ -11,7 +11,8 @@ import {
   type ProjectRow,
   type TaskWithContext,
 } from '../db/repository.js';
-import { isClean } from '../git/git.js';
+import { explainGitError } from '../git/errors.js';
+import { getRepoInfo, isClean } from '../git/git.js';
 import type { Runner } from '../runner/runner.js';
 import { ServiceError, type TaskService } from '../tasks/task-service.js';
 import type { RunView } from './runs.js';
@@ -19,6 +20,8 @@ import type { RunView } from './runs.js';
 export interface ProjectView extends ProjectRow {
   /** Whether the user's working tree has uncommitted changes (agents do not see those). */
   clean: boolean | null;
+  /** false for a fresh repository: tasks cannot start before the first commit. */
+  hasCommits: boolean;
   taskCount: number;
 }
 
@@ -36,7 +39,10 @@ export interface TaskView {
   baseRef: string | null;
   changedFiles: string[];
   unexpectedFiles: string[];
+  /** Last git problem, in Turkish when it is a common one. */
   gitError: string | null;
+  /** git's own message behind gitError (shown under "Ayrıntı"). */
+  gitErrorDetail: string | null;
   createdAt: string;
   active: boolean;
   latestRun: RunView | null;
@@ -77,7 +83,8 @@ export function registerProjectRoutes(
       baseRef: task.baseRef,
       changedFiles: task.changedFiles,
       unexpectedFiles: task.unexpectedFiles,
-      gitError: task.gitError,
+      gitError: task.gitError ? (explainGitError(task.gitError)?.message ?? task.gitError) : null,
+      gitErrorDetail: task.gitError,
       createdAt: task.createdAt,
       active: runner.isTaskRunning(task.id),
       latestRun: run ? { ...run, active: runner.isRunning(run.id) } : null,
@@ -90,15 +97,29 @@ export function registerProjectRoutes(
     return taskView(ctx);
   };
 
-  const projectView = async (project: ProjectRow): Promise<ProjectView> => ({
-    ...project,
-    clean: existsSync(project.path) ? await isClean(project.path).catch(() => null) : null,
-    taskCount: listProjectTasks(db, project.id).length,
-  });
+  const projectView = async (stored: ProjectRow): Promise<ProjectView> => {
+    // The stored main branch can go stale; show (and keep) what the repository has now.
+    const project = await tasks.refreshMainBranch(stored).catch(() => stored);
+    const there = existsSync(project.path);
+    const info = there ? await getRepoInfo(project.path).catch(() => null) : null;
+    return {
+      ...project,
+      clean: there ? await isClean(project.path).catch(() => null) : null,
+      hasCommits: info?.hasCommits ?? false,
+      taskCount: listProjectTasks(db, project.id).length,
+    };
+  };
 
   app.get('/api/projects', async () => ({
     projects: await Promise.all(listProjects(db).map(projectView)),
   }));
+
+  /** Forgets the project in Squadboard only; the folder and the repository stay as they are. */
+  app.delete('/api/projects/:id', async (request, reply) => {
+    const { id } = IdParams.parse(request.params);
+    tasks.deleteProject(id);
+    return reply.code(204).send();
+  });
 
   app.post('/api/projects', async (request, reply) => {
     const { path } = AddProjectBody.parse(request.body);
@@ -115,7 +136,7 @@ export function registerProjectRoutes(
   app.post('/api/projects/:id/tasks', async (request, reply) => {
     const { id } = IdParams.parse(request.params);
     const body = CreateTaskBody.parse(request.body);
-    const created = tasks.createTask(id, {
+    const created = await tasks.createTask(id, {
       title: body.title,
       prompt: body.prompt,
       agent: body.agent,
