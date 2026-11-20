@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { gitSync, makeTestRepo, snapshotUserRepo, type TestRepo } from '../../test/git-repo.js';
 import { fakeClaude, FIXTURES, waitFor } from '../../test/helpers.js';
 import { openDatabase, type DbHandle } from '../db/index.js';
-import { getProject, getTask } from '../db/repository.js';
+import { getProject, getTask, listRuns } from '../db/repository.js';
 import { Runner } from '../runner/runner.js';
 import { buildClaudeArgs } from '../runner/claude-cli.js';
 import { DEFAULT_AGENT_OPTIONS, ServiceError, TaskService } from './task-service.js';
@@ -191,7 +191,8 @@ describe('main branch', () => {
 
 describe('tasks in worktrees', () => {
   it('two tasks run at the same time in separate worktrees; the user checkout never changes', async () => {
-    const r = setup({ delayMs: 60, write: { 'notes/agent.md': 'written by the agent\n' } });
+    // Each fake run lasts ~3 s, longer than starting the other task (git is slow on Windows CI).
+    const r = setup({ delayMs: 300, write: { 'notes/agent.md': 'written by the agent\n' } });
     const project = await service.addProject(r.repo);
     const a = await service.createTask(project.id, {
       title: 'Giriş API',
@@ -205,8 +206,13 @@ describe('tasks in worktrees', () => {
     });
 
     const [ha, hb] = await Promise.all([service.startTask(a.id), service.startTask(b.id)]);
-    expect(runner.isTaskRunning(a.id) && runner.isTaskRunning(b.id)).toBe(true);
     await Promise.all([ha.done, hb.done]);
+
+    // They really overlapped: each run started before the other one ended.
+    const [ra] = listRuns(db.db, a.id);
+    const [rb] = listRuns(db.db, b.id);
+    if (!ra?.endedAt || !rb?.endedAt) throw new Error('both runs must have ended');
+    expect(ra.startedAt < rb.endedAt && rb.startedAt < ra.endedAt).toBe(true);
 
     const ta = task(a.id);
     const tb = task(b.id);
