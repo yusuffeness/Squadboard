@@ -36,7 +36,7 @@ Ekip Panosu, geliştiricilerin kendi bilgisayarında çalıştırdığı açık 
 
 ## Ekran tasarımları
 
-İlk taslak [Ajan Ekibim – Tasarım Taslağı](https://claude.ai/artifact/Sb2sNmJ27NvBkTsPmPLKbx) kanvasında. Güncel referans ise [docs/design/](design/) içindeki 19 ekran görselidir (`v2-01-pano.jpg` … `v2-19-bilesenler.jpg`); arayüz bunlara birebir yakın yazılır. Aşama 6'da kabuk (v2-01, v2-18), bileşenler (v2-19) ve Pano (v2-01, v2-02, v2-04) yazıldı; karar, plan onayı, inceleme, ekip kurma, geçmiş, harcama, ayarlar, onboarding ve hata ekranları kendi aşamalarında o görsellere göre gelecek. Görsellerdeki rakamlar (%62, $0,42) örnektir: CLI ilerleme yüzdesi vermediği için çalışan işte ilerleme çubuğu belirsizdir, maliyet yalnızca run'ın gerçek `costUsd` alanından gelir.
+İlk taslak [Ajan Ekibim – Tasarım Taslağı](https://claude.ai/artifact/Sb2sNmJ27NvBkTsPmPLKbx) kanvasında. Güncel referans ise [docs/design/](design/) içindeki 19 ekran görselidir (`v2-01-pano.jpg` … `v2-19-bilesenler.jpg`); arayüz bunlara birebir yakın yazılır. Aşama 6'da kabuk (v2-01, v2-18), bileşenler (v2-19) ve Pano (v2-01, v2-02, v2-04) yazıldı; Aşama 7'de Ekibini kur (v2-07) ve Ekip (v2-11) yazıldı; karar, plan onayı, inceleme, geçmiş, harcama, ayarlar, onboarding ve hata ekranları kendi aşamalarında o görsellere göre gelecek. Görsellerdeki rakamlar (%62, $0,42) örnektir: CLI ilerleme yüzdesi vermediği için çalışan işte ilerleme çubuğu belirsizdir, maliyet yalnızca run'ın gerçek `costUsd` alanından gelir.
 
 | # | Ekran | Amaç | Ana bileşenler | Veri kaynağı |
 | --- | --- | --- | --- | --- |
@@ -87,14 +87,16 @@ squadboard/
     server/    # Fastify, orkestratör, runner, git, SQLite
                # drizzle/: SQL migration'ları; test/fake-claude.mjs: kayıtları oynatan sahte CLI
                # bin/squadboard.js → src/cli.ts: `squadboard` komutu; src/dev.ts: `pnpm dev` girişi
-               # src/git: git servisi (worktree, diff, commit); src/tasks: proje ve görev yaşam döngüsü
+               # src/git: git servisi (worktree, diff, commit, ana dal tespiti, Türkçe hatalar)
+               # src/tasks: proje ve görev yaşam döngüsü; src/team: .team/ okuma, kurulum, ajan ayarları
     web/       # React arayüzü (Vite, Tailwind v4)
                # src/lib: API sorguları (TanStack Query), run başına tek SSE akışı, hash router
                #   (#token=…&p=…&task=…), Zustand (isim modu, seçili proje), pano kuralları (board.ts)
                # src/ui: v2-19 bileşenleri; src/shell: menü, üst çubuk, mobil sekme çubuğu
-               # src/pages: Pano, ajan detayı, "Yakında" sayfaları; e2e: Playwright smoke testleri
+               # src/pages: Pano, ajan detayı, Ekip (Ekibini kur, üyeler), "Yakında" sayfaları
+               # e2e: Playwright smoke testleri (API sayfada taklit edilir)
     spike/     # Aşama 1 keşif kodu, ürün kodu değil (silinebilir)
-  templates/   # hazır ekip şablonları (fullstack, api, fix)
+  templates/   # hazır ekip şablonları: <id>/.team/team.json + <id>/.claude/agents/*.md
   docs/        # ARCHITECTURE.md, claude-cli-notes.md (Aşama 1 bulguları)
 ```
 
@@ -182,12 +184,19 @@ claude -p "$GÖREV_METNİ" \
 
 `resume()` işin son oturumunu, o oturumun kaydedildiği klasörden `--resume` ile sürdürür; başka bir klasör verilirse süreci başlatmadan hata verir. Testler gerçek CLI yerine `packages/server/test/fake-claude.mjs` ile çalışır: Aşama 1 kayıtlarını oynatır, `--verbose` ve klasöre bağlı oturum davranışını taklit eder, durdurma testi için torun süreç başlatabilir. CI'da gerçek `claude` gerekmez.
 
-**HTTP API** (`packages/server/src/routes/`, Aşama 4–5). Hepsi anahtar ister (yukarıdaki Güvenlik bölümü). Hatalar `{ "error": "…" }` olarak döner (400 geçersiz girdi, 404 bulunamadı, 409 şu an yapılamaz).
+**HTTP API** (`packages/server/src/routes/`, Aşama 4–7). Hepsi anahtar ister (yukarıdaki Güvenlik bölümü). Hatalar `{ "error": "…", "detail"?: "…" }` olarak döner (400 geçersiz girdi, 404 bulunamadı, 409 şu an yapılamaz). `error` kullanıcının okuyacağı cümledir; sık git hataları (dal yok, commit yok, repo değil, çalışma ağacı kirli) Türkçeye çevrilir (`git/errors.ts`), git'in kendi çıktısı `detail` içinde kalır ve arayüzde "Ayrıntı" altında gösterilir.
 
 | Uç nokta | Ne yapar |
 | --- | --- |
-| `GET /api/projects` | Projeler: yol, ana dal, kullanıcının çalışma ağacı temiz mi (`clean`), görev sayısı. |
-| `POST /api/projects` | `{ path }`. Mutlak yol, commit'i olan bir git reposu olmalı (alt klasör verilirse repo köküne çevrilir). O an çıkış yapılmış dal "ana dal" olur. Aynı repo ikinci kez eklenirse var olan proje döner. |
+| `GET /api/projects` | Projeler: yol, ana dal (her listede yeniden tespit edilir), kullanıcının çalışma ağacı temiz mi (`clean`), commit'i var mı (`hasCommits`), görev sayısı. |
+| `POST /api/projects` | `{ path }`. Mutlak yol, bir git reposu olmalı (alt klasör verilirse repo köküne çevrilir). Commit'i olmayan repo da eklenir (ekip kurulabilsin diye); görevler ilk commit'ten sonra başlar, arayüz uyarır. Aynı repo ikinci kez eklenirse var olan proje döner. |
+| `DELETE /api/projects/:id` | Projeyi yalnızca Squadboard'dan siler: görevler, run'lar, olaylar `ON DELETE CASCADE` ile gider. Kullanıcının klasörüne, dallarına ve Squadboard'ın worktree klasörlerine dokunulmaz. Çalışan görev varken 409. |
+| `GET /api/projects/:id/checks` | Ekibini kur kontrol listesi: git deposu mu, ana dal, commit var mı, çalışma ağacındaki değişiklik sayısı, `claude --version` (model çağrısı yapmaz, 1 dk önbellekli). |
+| `GET /api/templates` | `templates/` altındaki şablonlar, ajanlarıyla. |
+| `GET /api/projects/:id/team` | `{ status: "missing" }`, `{ status: "invalid", error }` (Türkçe, alan adıyla) ya da `{ status: "ok", team }`. |
+| `POST /api/projects/:id/team/install` | `{ templateId, agents?, settings?, overwrite? }`. Şablonu projeye yazar (aşağıda). İçeriği farklı dosya varsa ve `overwrite` yoksa hiçbir şey yazmadan 409 ve `conflicts: [...]`. |
+| `PATCH /api/projects/:id/team/settings` | Ekip ayarları (`concurrency`, `worktrees`, `requirePlanApproval`, `requireReview`). |
+| `PATCH /api/projects/:id/team/agents/:agentId` | `{ enabled?, names?, prompt?, model? }`. Aç/kapa ve isimler `team.json`'a, talimat ve model ajanın `.md` dosyasına yazılır. En az bir ajan açık kalmalı. |
 | `GET /api/projects/:id/tasks` | Görevler (oluşturulma sırasıyla): durum, ajan, dal, değişen ve beklenmeyen dosyalar, git hatası, son run. |
 | `POST /api/projects/:id/tasks` | `{ title, prompt, agent?, expectedFiles?, dependsOn? }`. `dependsOn` bitmemiş bir görevse yeni görev `blocked` başlar. |
 | `GET /api/tasks/:id` | Tek görev. |
@@ -201,7 +210,7 @@ claude -p "$GÖREV_METNİ" \
 
 Geçmişi oynatma ile canlı dinlemeye geçiş aynı senkron adımda yapılır: `better-sqlite3` senkron çalışır ve runner her olayı yayınlamadan önce veritabanına yazar; bu yüzden aradaki bir olay kaybolamaz ya da iki kez gönderilemez.
 
-Ajanlar şimdilik tek bir varsayılanla çalışır (`DEFAULT_AGENT_OPTIONS`, `tasks/task-service.ts`): `acceptEdits`, araçlar `Read, Edit, Write, Glob, Grep`, hem `--tools` (kullanılabilir araç kümesi) hem `--allowedTools` ile; yalnızca `--allowedTools` kabuk komutlarını engellemiyor (bkz. claude-cli-notes §13). Bütçe $1. Ajan adı (`general`, `backend`…) yalnızca etiket; gerçek ajanlar ve araç listeleri ileride `.team/` şablonlarından gelecek. Aşama 4'teki "klasörde doğrudan çalıştır" ucu (`POST /api/runs`) Aşama 5'te kaldırıldı, çünkü ajanı kullanıcının çalışma ağacında çalıştırıyordu; run'lar artık yalnızca görevler üzerinden, görevin worktree'sinde başlar.
+Ajan ayarları görevin ajanının tanımından gelir (`TeamService.runConfig`, aşağıdaki "Ajan ve ekip şablonu formatı"). Projede ekip yoksa ya da görevin ajanı ekipte yoksa varsayılana düşülür (`DEFAULT_AGENT_OPTIONS`, `tasks/task-service.ts`): `acceptEdits`, araçlar `Read, Edit, Write, Glob, Grep`, hem `--tools` (kullanılabilir araç kümesi) hem `--allowedTools` ile; yalnızca `--allowedTools` kabuk komutlarını engellemiyor (bkz. claude-cli-notes §13). Bütçe $1. Ekipte kapalı bir ajanın görevi başlatılmaz (409). Aşama 4'teki "klasörde doğrudan çalıştır" ucu (`POST /api/runs`) Aşama 5'te kaldırıldı, çünkü ajanı kullanıcının çalışma ağacında çalıştırıyordu; run'lar artık yalnızca görevler üzerinden, görevin worktree'sinde başlar.
 
 **Oturum ve süreç.**
 
@@ -216,13 +225,14 @@ Ajanlar şimdilik tek bir varsayılanla çalışır (`DEFAULT_AGENT_OPTIONS`, `t
 
 Claude Code'un kendi [`--worktree`/`-w` bayrağı](https://claudefa.st/blog/guide/development/worktree-guide) da var; biz worktree'yi kendimiz `git worktree add` ile açıyoruz, çünkü dal adını ve yığın dalları biz belirlemek istiyoruz.
 
-*Temel kural: kullanıcının çalışma ağacına ve ana dalına asla dokunulmaz.* Squadboard kullanıcının klasöründe dosya yazmaz, `checkout` / `reset` / `commit` yapmaz, çıkış yapılmış dalı ve `main` ref'ini oynatmaz. Repoya dokunan tek şeyler `git worktree` kayıtları (`.git/worktrees/`) ve `team/` altındaki dallardır. Git servisi `team/` dışında dal oluşturmayı, silmeyi ve commit atmayı reddeder. Testler her senaryodan sonra kullanıcı reposunun dalını, HEAD'ini, `main` ref'ini ve `git status` çıktısını karşılaştırır.
+*Temel kural: kullanıcının çalışma ağacına ve ana dalına asla dokunulmaz.* Tek istisna, kullanıcının açıkça istediği ekip kurulumudur: "Ekibi kur" ve Ekip sayfasındaki "Kaydet" yalnızca `.team/team.json` ve `.claude/agents/*.md` dosyalarını yazar, commit'lemez (commit kullanıcıya kalır). Bunun dışında Squadboard kullanıcının klasöründe dosya yazmaz, `checkout` / `reset` / `commit` yapmaz, çıkış yapılmış dalı ve `main` ref'ini oynatmaz. Repoya dokunan tek şeyler `git worktree` kayıtları (`.git/worktrees/`) ve `team/` altındaki dallardır. Git servisi `team/` dışında dal oluşturmayı, silmeyi ve commit atmayı reddeder. Testler her senaryodan sonra kullanıcı reposunun dalını, HEAD'ini, `main` ref'ini ve `git status` çıktısını karşılaştırır.
 
 | Konu | Karar |
 | --- | --- |
 | Worktree yeri | `~/.squadboard/worktrees/<proje-id>/<dal-adı>` (`SQUADBOARD_WORKTREES` ile değiştirilebilir). Kullanıcının reposunun **dışında**: rapordaki `.ekip/worktrees` yolu çalışma ağacına izlenmeyen bir klasör eklerdi. |
 | Dal adı | `team/<başlık-slug>-<görev id'sinin ilk 4 karakteri>`, Türkçe karakterler ASCII'ye çevrilir (`Giriş API` → `team/giris-api-9f3c`). |
 | Ne zaman açılır | Görev ilk kez başlatılınca. Temizlendikten sonra yeniden başlatılırsa aynı yolda, var olan dal üzerinde yeniden açılır; böylece Claude oturumu (klasöre bağlı) da sürdürülebilir kalır. |
+| Ana dal | Kayıtlı dala güvenilmez, her görev oluşturulurken ve worktree açılırken yeniden tespit edilir (`detectMainBranch`): kayıtlı dal hâlâ varsa o, yoksa `origin/HEAD`, sonra çıkış yapılmış dal, sonra `main` / `master`; yalnızca commit'i olan dallar sayılır. Değiştiyse proje kaydı güncellenir. (Örnek: proje `main` diye kaydedilmiş ama repo `master` kullanıyor; eskiden görev açılamıyordu.) Hiç commit'li dal yoksa görev başlamaz, "Depoda henüz commit yok" denir. |
 | Başlangıç noktası | Bağımlılığı yoksa projenin ana dalı. Bağımlılığı varsa o görevin dalı (**yığın dal**). Başlangıç commit'i (`baseCommit`) kaydedilir; değişiklikler ona göre ölçülür. Şimdilik en fazla bir bağımlılık; birden çoğu iki dalı birleştirmeyi gerektirir (Aşama 8). |
 | Bağımlılık | Bağımlı görev, bağımlılığı `in_review` ya da `done` olana kadar `blocked` kalır; bağımlılık bitince otomatik `planned` olur. |
 | Ajanın işi | Run `in_review` ile bitince worktree'deki her şey görevin **kendi dalına** commit'lenir (`squadboard: <başlık>`), bağımlı görev bu commit'ten başlar. Repoda `user.email` yoksa "Squadboard &lt;squadboard@localhost&gt;" kimliği kullanılır. Durdurulan ya da beklemeye düşen işler commit'lenmez. |
@@ -235,44 +245,60 @@ Claude Code'un kendi [`--worktree`/`-w` bayrağı](https://claudefa.st/blog/guid
 
 ## Ajan ve ekip şablonu formatı
 
-Bir ekip, projede `.team/` klasöründe duran dosyalardan oluşur ve git'e eklenebilir. Rol talimatları Claude Code'un alt ajan (subagent) biçimine benzer: Markdown dosyası, üstte YAML başlık (`name`, `description`, `tools`, `model`), altında sistem talimatı ([belge](https://docs.claude.com/en/docs/claude-code/sub-agents)). Arayüze özel alanlar (isim, renk, sahip olduğu dosyalar) ayrı bir `team.json` dosyasında durur, böylece başlık alanı Claude Code ile uyumlu kalır.
+Bir ekip, projenin içinde duran iki tür dosyadan oluşur ve git'e eklenebilir (Aşama 7):
 
-**`.team/backend.md`**
+- `.team/team.json`: ekipte kim var, iki isim, renk, sahip olduğu yollar, ekip ayarları. Arayüze özel alanlar burada durur, böylece ajan dosyalarının başlığı Claude Code ile uyumlu kalır.
+- `.claude/agents/<file>.md`: Claude Code'un alt ajan (subagent) biçimi ([belge](https://docs.claude.com/en/docs/claude-code/sub-agents)): üstte YAML başlık (`name`, `description`, `tools`, `model`, isteğe bağlı `permissionMode`), altında sistem talimatı.
+
+**`.claude/agents/backend.md`**
 
 ```markdown
 ---
 name: backend
-description: API uç noktaları, iş mantığı ve kimlik doğrulama yazar.
-tools: Read, Edit, Write, Grep, Glob, Bash
+description: Sunucu ve API yazar
+tools: Read, Edit, Write, Glob, Grep
 model: sonnet
 ---
-Sen bu projenin Backend ajanısın. Yalnızca `src/api/**` ve `src/server/**` içinde çalış.
-Karar gerekiyorsa işi durdur ve son mesaja bir KARAR bloğu yaz: soru ve seçenekler.
-İş bitince ne değiştirdiğini üç maddede özetle.
+
+Sen bu projenin Arka Yüz ajanısın. Sunucu kodunu, API uç noktalarını ve iş mantığını yazarsın.
+…
 ```
 
 **`.team/team.json`**
 
 ```json
 {
-  "id": "fullstack",
+  "id": "fullstack-web",
   "name": "Full-stack web uygulaması",
+  "description": "Altı kişilik ekip.",
   "agents": [
     {
       "id": "backend",
       "file": "backend.md",
-      "names": { "tech": "Backend", "friendly": "Motor" },
+      "names": { "tech": "Arka Yüz", "friendly": "Motor" },
       "color": "#8FB3FF",
-      "owns": ["src/api/**", "src/server/**"]
+      "owns": ["src/api/**", "src/server/**"],
+      "enabled": true,
+      "budgetUsd": 1
     }
   ],
   "settings": { "concurrency": 3, "worktrees": true, "requirePlanApproval": true, "requireReview": true }
 }
 ```
 
-- `owns`: ajanın dokunması beklenen yollar. Planlayıcı görevleri buna göre dağıtır, çakışma tahmini de bundan beslenir.
-- `names`: iki isim modu. Yeni bir alan (içerik ekibi gibi) eklemek yeni bir şablon klasörü eklemekten ibaret olur.
-- Kullanıcı kendi ajanını arayüzden ya da dosya ekleyerek ekler. Ajan adı `claude` ya da `anthropic` içermemelidir (alt ajan ad kuralı).
+- Şema `packages/core/src/team.ts` içinde (Zod). Elle düzenlenen dosya her okumada doğrulanır; hata mesajı Türkçedir ve alanı gösterir (ör. `.team/team.json geçersiz: agents[0].color: color "#RRGGBB" biçiminde bir renk olmalı`). Eksik ya da bozuk ajan dosyası, `name` ile `id`'nin uyuşmaması da aynı şekilde raporlanır. Geçersiz ekipte görevler varsayılan ajanla çalışır, arayüz uyarır.
+- `id`: küçük harf, rakam, tire; `claude` ya da `anthropic` içeremez (alt ajan ad kuralı). Ajan dosyasındaki `name` ile aynı olmalı.
+- `names`: iki isim modu (Teknik / Sade). Arayüzdeki isimler ve renkler buradan gelir; ekip kurulmamış projede web'deki sabit liste (`lib/agents.ts`) yedek olarak kullanılır. "Genel" ajanı şablon dışıdır: rolü olmayan eski görevler ve ekipte artık olmayan ajanlar için.
+- `owns`: ajanın dokunması beklenen yollar. Planlayıcı görevleri buna göre dağıtacak, çakışma tahmini de bundan beslenecek.
+- `enabled`: Ekip sayfasındaki anahtar. Kapalı ajan yeni görevlere önerilmez, görevi başlatılmaz. `budgetUsd`: run başına harcama sınırı (varsayılan 1).
+- `tools`: `--tools` ile gerçekten uygulanır (İnceleyici ve Planlayıcı `Read, Glob, Grep` ile salt okunurdur). Aynı liste `--allowedTools` ile otomatik onaylanır, `Bash` hariç: çıplak `Bash` her kabuk komutunu onaylardı. `tools` yazılmamışsa güvenli varsayılan (`Read, Edit, Write, Glob, Grep`) kullanılır.
+
+**Ajan tanımı çalıştırmaya nasıl gider.** Sunucu tanımı her görev başlarken **kullanıcının kendi klasöründen** okur (worktree'den değil) ve `claude -p`'ye açıkça geçer: talimat `--append-system-prompt`, araçlar `--tools` / `--allowedTools`, `--model`, `--max-budget-usd`, `--permission-mode`. Böylece commit'lenmemiş bir düzenleme bir sonraki görevde geçerli olur. Claude Code'un `--agent` bayrağı kullanılmaz; nedeni claude-cli-notes §15'teki deneyde.
+
+**Şablonlar** `templates/<id>/` altında, projeye yazılacak hâliyle durur: `fullstack-web` (Planlayıcı, Ön Yüz, Arka Yüz, Veritabanı, Test, İnceleyici) ve `minimal` (Planlayıcı, Geliştirici, İnceleyici). Kurulum (`TeamService.install`) dosyaları projeye kopyalar, seçilmeyen ajanları `enabled: false` yazar. Aynı içerikli dosyalara dokunmaz (tekrar kurmak güvenli); içeriği farklı bir dosya varsa hiçbir şey yazmadan sorar ("Üzerine yazılsın mı?"). Hiçbir şey commit'lenmez.
+
+- Kullanıcı kendi ajanını dosya ekleyerek ekler (`.claude/agents/<ad>.md` + `team.json`'a bir satır). Yeni bir alan (içerik ekibi gibi) yeni bir şablon klasörü eklemekten ibarettir.
+- Ekip sayfası bir ajanı kaydederken ajan dosyasını yeniden yazar; başlıktaki yorumlar ve bilinmeyen alanlar bu sırada düşer. `team.json`'daki bilinmeyen alanlar korunur.
 
 ## Plan akışı, bağımlılık ve çakışma yönetimi
 
@@ -388,7 +414,7 @@ Numaralar "Aşama Planı ve Promptlar" belgesindeki aşamalarla aynıdır.
 | 4. Server, SSE ve prototip arayüz | Anahtar + Host/Origin denetimi, run API'si, SSE canlı akış, tek sayfalık arayüz, `squadboard` komutu, kapanışta `stopAll()` | Tarayıcıda prompt yazıp gerçek `claude` çıktısı canlı izleniyor; Durdur süreci öldürüyor; anahtarsız ya da yanlış Origin'li istek reddediliyor; yenileyince geçmiş run'lar görünüyor | ✅ (elle denendi) |
 | 5. Proje, görev ve git worktree | Git servisi, proje ekleme, görev oluşturma ve başlatma, her görev kendi worktree ve `team/` dalında, yığın dallar, değişen/beklenmeyen dosyalar, temizlik, sıralı görev listesi | İki görev aynı anda ayrı worktree'lerde çalışıyor; kullanıcının klasöründe hiçbir dosya değişmiyor; git testleri yeşil, worktree temizlenebiliyor | ✅ (elle denendi) |
 | 6. Pano ve tasarım sistemi | Tasarım token'ları (v2 paleti, Nunito + JetBrains Mono, 44 px / 13 px), uygulama kabuğu (menü, proje hapı, isim modu, bugünkü maliyet, mobil sekme çubuğu), v2-19 temel bileşenleri, Pano (karşılama, ajan şeridi, 4 sütun, görev kartları, ajan detayı), boş ve hata durumları; TanStack Query + SSE + Zustand, 2 sn yoklama kaldırıldı | Pano gerçek API ile açılıyor ve canlı güncelleniyor; isim modu değişip kalıcı; 390 px'te yatay taşma yok; Playwright smoke testleri CI'da yeşil | ✅ (smoke testleri; elle deneme bekliyor) |
-| 7. Şablonlar ve Ekibini kur | `.team/` şablon yükleyici ve doğrulama, hazır şablonlar (fullstack, api, fix), ajan başına araç ve izin listeleri, Ekibini kur ekranı (v2-07) | Şablon seçilip ekip kuruluyor; ajanlar şablondaki araç ve izinlerle çalışıyor | |
+| 7. Şablonlar ve Ekibini kur | `.team/team.json` şeması ve doğrulama, hazır şablonlar (`fullstack-web`, `minimal`) ve `.claude/agents/` dosyaları, ajan başına araç, model, bütçe ve izin, Ekibini kur (v2-07) ve Ekip (v2-11) ekranları; ana dalın her görevde yeniden tespiti, Türkçe git hataları, proje silme | Şablon kurulunca `.team/` ve `.claude/agents/` oluşuyor; isimler ve renkler şablondan geliyor; İnceleyici salt okunur; ajan ayarları çalıştırmaya yansıyor; elle düzenlenen `team.json` doğrulanıyor; `master` deposunda görev açılıyor | ✅ (testler; elle deneme bekliyor) |
 | 8. Planner ve scheduler | Planner (`--json-schema`, `openDecisions`), Plan onayı ekranı (v2-05, v2-06), bağımlılık ve çakışma kontrolü, eşzamanlılık sınırıyla zamanlayıcı | Tek istekten 4-5 iş sırayla ve paralel çalışıyor | |
 | 9. Karar ve izin akışı | Plan kararlarının onayda cevaplanması, KARAR yedek akışı, izin kartı (`permission_denials` → izin → `--resume`), Karar ekranı (v2-03) | Plan kararları onayda cevaplanıyor; ajan durunca karar ya da izin kartı çıkıyor, cevaptan sonra aynı oturum sürüyor | |
 | 10. Reviewer ve merge | Reviewer şeması, İnceleme ekranı (v2-08), test komutu, Onayla ve birleştir (v2-09), Değişiklik iste | İnceleme akışı uçtan uca çalışıyor; onaylanan dal ana dala birleşiyor, worktree temizleniyor | |
