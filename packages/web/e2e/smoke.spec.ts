@@ -97,11 +97,11 @@ test('menu routes work', async ({ page }) => {
   await page
     .getByRole('navigation', { name: 'Ana menü' })
     .first()
-    .getByRole('button', { name: 'Ekip' })
+    .getByRole('button', { name: 'Geçmiş' })
     .click();
-  await expect(page.getByRole('heading', { level: 1, name: 'Ekip' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: 'Geçmiş' })).toBeVisible();
   await expect(page.getByText('Yakında')).toBeVisible();
-  expect(page.url()).toContain('p=ekip');
+  expect(page.url()).toContain('p=gecmis');
   expect(page.url()).toContain('token=test-token');
 });
 
