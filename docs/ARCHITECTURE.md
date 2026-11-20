@@ -36,7 +36,7 @@ Ekip Panosu, geliştiricilerin kendi bilgisayarında çalıştırdığı açık 
 
 ## Ekran tasarımları
 
-Tıklanabilir dört ekranlık taslak [Ajan Ekibim – Tasarım Taslağı](https://claude.ai/artifact/Sb2sNmJ27NvBkTsPmPLKbx) kanvasında duruyor. Her ekranın kapladığı iş aşağıda.
+İlk taslak [Ajan Ekibim – Tasarım Taslağı](https://claude.ai/artifact/Sb2sNmJ27NvBkTsPmPLKbx) kanvasında. Güncel referans ise [docs/design/](design/) içindeki 19 ekran görselidir (`v2-01-pano.jpg` … `v2-19-bilesenler.jpg`); arayüz bunlara birebir yakın yazılır. Aşama 6'da kabuk (v2-01, v2-18), bileşenler (v2-19) ve Pano (v2-01, v2-02, v2-04) yazıldı; karar, plan onayı, inceleme, ekip kurma, geçmiş, harcama, ayarlar, onboarding ve hata ekranları kendi aşamalarında o görsellere göre gelecek. Görsellerdeki rakamlar (%62, $0,42) örnektir: CLI ilerleme yüzdesi vermediği için çalışan işte ilerleme çubuğu belirsizdir, maliyet yalnızca run'ın gerçek `costUsd` alanından gelir.
 
 | # | Ekran | Amaç | Ana bileşenler | Veri kaynağı |
 | --- | --- | --- | --- | --- |
@@ -47,10 +47,10 @@ Tıklanabilir dört ekranlık taslak [Ajan Ekibim – Tasarım Taslağı](https:
 
 **Tasarım kararları**
 
-- İsim modu: Teknik (Frontend, Backend, Database, Test, Reviewer, Planner) varsayılan; Sade (Pixel, Motor, Kutu, Dedektif, Usta, Kaptan) isteğe bağlı. İki isim de şablon dosyasında durur.
-- Renk: zemin `#F6F3EE`, metin `#1F2430`, vurgu `#E8664A`, başarı `#2F9E6B`, uyarı `#B26A00`. Ajan renkleri pastel, kartlarda avatar olarak kullanılır.
+- İsim modu: Teknik (Planlayıcı, Ön Yüz, Arka Yüz, Veritabanı, Test, İnceleyici) varsayılan; Sade (Kaptan, Pixel, Motor, Kutu, Dedektif, Usta) isteğe bağlı. Üst çubuktaki anahtarla değişir, tercih tarayıcıda (`localStorage`) kalır. Şimdilik `packages/web/src/lib/agents.ts` içinde; ileride iki isim de şablon dosyasında durur.
+- Renk: şeftali zemin `#FCF3EC` (gradyan ve bulanık renkli daireler), kart `#FFFCFA`, metin `#1F2430`, vurgu `#E8664A`, başarı `#2F9E6B`, uyarı `#B26A00`, koyu log paneli `#1D2130`. Ajan pastelleri: Planlayıcı `#9ED8E8`, Ön Yüz `#FFB38A`, Arka Yüz `#8FB3FF`, Veritabanı `#86D3AE`, Test `#C6A8F0`, İnceleyici `#F5D27A`. Hepsi `packages/web/src/index.css` `@theme` bloğunda token; bileşenlerde ham hex yazılmaz.
 - Yazı tipi: Nunito (arayüz), JetBrains Mono (dal, dosya ve çıktı).
-- Erişilebilirlik: dokunma hedefi en az 44 px, metin kontrastı 4,5:1 ve üstü, durum yalnızca renkle değil metinle de gösterilir, anahtarlar `role="switch"`.
+- Erişilebilirlik: dokunma hedefi en az 44 px, en küçük metin 13 px (`text-xs` buna göre tanımlı), metin kontrastı 4,5:1 ve üstü, durum yalnızca renkle değil metinle de gösterilir, anahtarlar `role="switch"`.
 - Karar kutusu her zaman sayfanın üst yarısında; ajan bekliyorsa göz ardı edilemez.
 - Canlı çıktı koyu zeminli ve ayrı bir kutuda; sade özet ise insan diliyle yazılmış üç dört satır.
 
@@ -60,7 +60,7 @@ Tüm parçalar kullanıcının bilgisayarında çalışır. Dışarı çıkan te
 
 | Bileşen | Görev |
 | --- | --- |
-| Web arayüzü (React) | Dört ekran. Sunucuyla HTTP ile konuşur, canlı olayları SSE ile alır. |
+| Web arayüzü (React) | Kabuk, Pano ve sonraki aşamalarda gelen ekranlar. Sunucuyla HTTP ile konuşur, canlı olayları SSE ile alır. |
 | Yerel sunucu (Fastify) | API, olay akışı, statik arayüz dosyaları. Yalnızca `127.0.0.1`'e bağlanır. |
 | Orkestratör | Planı bağımlılık grafiğine çevirir, hazır işleri eşzamanlılık sınırına göre başlatır, karar bekleyenleri durdurur. |
 | Runner | `claude -p` sürecini başlatır, `stream-json` satırlarını okuyup olaylara çevirir, durdurma ve devam ettirmeyi yönetir. |
@@ -88,7 +88,11 @@ squadboard/
                # drizzle/: SQL migration'ları; test/fake-claude.mjs: kayıtları oynatan sahte CLI
                # bin/squadboard.js → src/cli.ts: `squadboard` komutu; src/dev.ts: `pnpm dev` girişi
                # src/git: git servisi (worktree, diff, commit); src/tasks: proje ve görev yaşam döngüsü
-    web/       # React arayüzü (Vite)
+    web/       # React arayüzü (Vite, Tailwind v4)
+               # src/lib: API sorguları (TanStack Query), run başına tek SSE akışı, hash router
+               #   (#token=…&p=…&task=…), Zustand (isim modu, seçili proje), pano kuralları (board.ts)
+               # src/ui: v2-19 bileşenleri; src/shell: menü, üst çubuk, mobil sekme çubuğu
+               # src/pages: Pano, ajan detayı, "Yakında" sayfaları; e2e: Playwright smoke testleri
     spike/     # Aşama 1 keşif kodu, ürün kodu değil (silinebilir)
   templates/   # hazır ekip şablonları (fullstack, api, fix)
   docs/        # ARCHITECTURE.md, claude-cli-notes.md (Aşama 1 bulguları)
@@ -219,7 +223,7 @@ Claude Code'un kendi [`--worktree`/`-w` bayrağı](https://claudefa.st/blog/guid
 | Worktree yeri | `~/.squadboard/worktrees/<proje-id>/<dal-adı>` (`SQUADBOARD_WORKTREES` ile değiştirilebilir). Kullanıcının reposunun **dışında**: rapordaki `.ekip/worktrees` yolu çalışma ağacına izlenmeyen bir klasör eklerdi. |
 | Dal adı | `team/<başlık-slug>-<görev id'sinin ilk 4 karakteri>`, Türkçe karakterler ASCII'ye çevrilir (`Giriş API` → `team/giris-api-9f3c`). |
 | Ne zaman açılır | Görev ilk kez başlatılınca. Temizlendikten sonra yeniden başlatılırsa aynı yolda, var olan dal üzerinde yeniden açılır; böylece Claude oturumu (klasöre bağlı) da sürdürülebilir kalır. |
-| Başlangıç noktası | Bağımlılığı yoksa projenin ana dalı. Bağımlılığı varsa o görevin dalı (**yığın dal**). Başlangıç commit'i (`baseCommit`) kaydedilir; değişiklikler ona göre ölçülür. Şimdilik en fazla bir bağımlılık; birden çoğu iki dalı birleştirmeyi gerektirir (Aşama 6). |
+| Başlangıç noktası | Bağımlılığı yoksa projenin ana dalı. Bağımlılığı varsa o görevin dalı (**yığın dal**). Başlangıç commit'i (`baseCommit`) kaydedilir; değişiklikler ona göre ölçülür. Şimdilik en fazla bir bağımlılık; birden çoğu iki dalı birleştirmeyi gerektirir (Aşama 8). |
 | Bağımlılık | Bağımlı görev, bağımlılığı `in_review` ya da `done` olana kadar `blocked` kalır; bağımlılık bitince otomatik `planned` olur. |
 | Ajanın işi | Run `in_review` ile bitince worktree'deki her şey görevin **kendi dalına** commit'lenir (`squadboard: <başlık>`), bağımlı görev bu commit'ten başlar. Repoda `user.email` yoksa "Squadboard &lt;squadboard@localhost&gt;" kimliği kullanılır. Durdurulan ya da beklemeye düşen işler commit'lenmez. |
 | Değişen dosyalar | Her run'dan sonra `git diff --name-only <baseCommit>` + izlenmeyen yeni dosyalar. `expectedFiles` doluysa bunlarla eşleşmeyenler `unexpectedFiles` olarak işaretlenir (arayüzde uyarı). Desen eşleme core'daki `patternsOverlap` ile. |
@@ -383,10 +387,14 @@ Numaralar "Aşama Planı ve Promptlar" belgesindeki aşamalarla aynıdır.
 | 3. Runner ve SQLite | SQLite + Drizzle (7 tablo, ilk migration), `claude -p` sürecini başlatma ve süreç ağacıyla sonlandırma, `--session-id` / `--resume`, `permission_denials` ve stderr hatalarını işleme, ortam temizliği, sahte CLI ile testler | Sahte CLI ile başlat, akış, durdur ve sürdür testleri Windows ve Linux'ta yeşil; olaylar DB'ye sırayla yazılıyor; durdurma sonrası artık süreç kalmıyor | ✅ (Windows ve Linux CI) |
 | 4. Server, SSE ve prototip arayüz | Anahtar + Host/Origin denetimi, run API'si, SSE canlı akış, tek sayfalık arayüz, `squadboard` komutu, kapanışta `stopAll()` | Tarayıcıda prompt yazıp gerçek `claude` çıktısı canlı izleniyor; Durdur süreci öldürüyor; anahtarsız ya da yanlış Origin'li istek reddediliyor; yenileyince geçmiş run'lar görünüyor | ✅ (elle denendi) |
 | 5. Proje, görev ve git worktree | Git servisi, proje ekleme, görev oluşturma ve başlatma, her görev kendi worktree ve `team/` dalında, yığın dallar, değişen/beklenmeyen dosyalar, temizlik, sıralı görev listesi | İki görev aynı anda ayrı worktree'lerde çalışıyor; kullanıcının klasöründe hiçbir dosya değişmiyor; git testleri yeşil, worktree temizlenebiliyor | ✅ (elle denendi) |
-| 6. Planner ve zamanlayıcı | Planner (`--json-schema`, `openDecisions`), Plan onayı ekranı, bağımlılık ve çakışma kontrolü, KARAR yedek akışı, izin kartı | Tek istekten 4-5 iş sırayla ve paralel çalışıyor; plan kararları onayda cevaplanıyor | |
-| 7. Reviewer ve cilalama | Reviewer şeması, İnceleme ekranı, test komutu, isim modları, Ekibini kur ekranı | Tasarım taslaklarındaki dört ekranın tam akışı çalışıyor | |
-| 8. Yayın | `npx` paketi, Windows/macOS/Linux denemesi, README (kurulum, kredi uyarısı), şablonlar, lisans, kısa demo videosu | Temiz bir bilgisayarda tek komutla kurulup ilk işin bittiği görülüyor | |
-| 9. Sonrası | Topluluk şablonları, başka alanlar (içerik ekibi gibi), başka CLI sürücüleri, masaüstü kabuğu | Talebe göre | |
+| 6. Pano ve tasarım sistemi | Tasarım token'ları (v2 paleti, Nunito + JetBrains Mono, 44 px / 13 px), uygulama kabuğu (menü, proje hapı, isim modu, bugünkü maliyet, mobil sekme çubuğu), v2-19 temel bileşenleri, Pano (karşılama, ajan şeridi, 4 sütun, görev kartları, ajan detayı), boş ve hata durumları; TanStack Query + SSE + Zustand, 2 sn yoklama kaldırıldı | Pano gerçek API ile açılıyor ve canlı güncelleniyor; isim modu değişip kalıcı; 390 px'te yatay taşma yok; Playwright smoke testleri CI'da yeşil | ✅ (smoke testleri; elle deneme bekliyor) |
+| 7. Şablonlar ve Ekibini kur | `.team/` şablon yükleyici ve doğrulama, hazır şablonlar (fullstack, api, fix), ajan başına araç ve izin listeleri, Ekibini kur ekranı (v2-07) | Şablon seçilip ekip kuruluyor; ajanlar şablondaki araç ve izinlerle çalışıyor | |
+| 8. Planner ve scheduler | Planner (`--json-schema`, `openDecisions`), Plan onayı ekranı (v2-05, v2-06), bağımlılık ve çakışma kontrolü, eşzamanlılık sınırıyla zamanlayıcı | Tek istekten 4-5 iş sırayla ve paralel çalışıyor | |
+| 9. Karar ve izin akışı | Plan kararlarının onayda cevaplanması, KARAR yedek akışı, izin kartı (`permission_denials` → izin → `--resume`), Karar ekranı (v2-03) | Plan kararları onayda cevaplanıyor; ajan durunca karar ya da izin kartı çıkıyor, cevaptan sonra aynı oturum sürüyor | |
+| 10. Reviewer ve merge | Reviewer şeması, İnceleme ekranı (v2-08), test komutu, Onayla ve birleştir (v2-09), Değişiklik iste | İnceleme akışı uçtan uca çalışıyor; onaylanan dal ana dala birleşiyor, worktree temizleniyor | |
+| 11. Dayanıklılık ve güvenlik | Sunucu yeniden başlayınca yarım kalan run ve görevlerin toparlanması, kredi ve limit bitimi (v2-16), Claude bulunamadı (v2-15) gibi hata durumları, güvenlik denetiminin gözden geçirilmesi | Çökme ya da kapanış sonrası veri kaybolmuyor, yetim süreç kalmıyor; hata ekranları gerçek durumlarda çıkıyor | |
+| 12. Yayın | `npx` paketi, Windows/macOS/Linux denemesi, README (kurulum, kredi uyarısı), lisans, kısa demo videosu | Temiz bir bilgisayarda tek komutla kurulup ilk işin bittiği görülüyor | |
+| Sonrası | Topluluk şablonları, başka alanlar (içerik ekibi gibi), başka CLI sürücüleri, masaüstü kabuğu | Talebe göre | |
 
 Aşama 1 en riskli adımdı ve raporun birkaç varsayımını değiştirdi (izin reddi, `--verbose`, KARAR, oturumun klasöre bağlı olması, süreç sonlandırma); bu belge o bulgulara göre güncellendi.
 
@@ -415,7 +423,7 @@ Aşama 1 en riskli adımdı ve raporun birkaç varsayımını değiştirdi (izin
 - [x] Ürün adı ve lisans: Squadboard, MIT.
 - [x] İlk sürümde yalnızca Claude Code.
 - [ ] macOS/Linux'ta süreç grubu sonlandırma, worktree içinden çalıştırma ve kredi bitince CLI davranışı henüz denenmedi.
-- [ ] Gerçekçi görevlerde Planner'ın ve ajanın gereksiz soru oranı (Aşama 6'da ölçülür).
+- [ ] Gerçekçi görevlerde Planner'ın ve ajanın gereksiz soru oranı (Aşama 8–9'da ölçülür).
 
 **Alınan kararlar (17 Kasım 2026)**
 

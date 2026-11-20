@@ -248,4 +248,13 @@ CLI davranışıyla ilgili olarak bu aşamada eklenenler:
 ### Aşama 5 elle denemesinden iki bulgu (gerçek `claude`)
 
 - ⚠️ **`--allowedTools` bir beyaz liste değil.** Yalnızca `--allowedTools Read,Edit,Write,Glob,Grep` verilen bir ajan Bash ile `ls` çalıştırabildi; reddedilmedi (`permission_denials` boş). Listede olmayan araçlar kullanılabilir kalıyor ve Claude Code salt okunur kabuk komutlarını kendiliğinden onaylıyor. Kullanılabilir araç kümesini gerçekten daraltan flag **`--tools`**. Varsayılan ajan artık ikisini birlikte veriyor (`DEFAULT_AGENT_OPTIONS`, testi var).
-- ⚠️ **Ajan `AskUserQuestion` ile soru sormaya çalışıyor.** "README'ye bir satır ekle" isteğinde ajan hangi satırı ekleyeceğini sordu; başsız modda araç reddedildi, ajan bir varsayılan seçip işi bitirdi. Runner reddi gördüğü için görev `waiting_decision` oldu ve iş commit'lenmedi. `--tools` ile bu araç artık hiç sunulmuyor. Açık soru: ajanın soruları KARAR akışına (Aşama 6) bağlanmalı mı? `AskUserQuestion` girdisi zaten soru + seçenekler biçiminde.
+- ⚠️ **Ajan `AskUserQuestion` ile soru sormaya çalışıyor.** "README'ye bir satır ekle" isteğinde ajan hangi satırı ekleyeceğini sordu; başsız modda araç reddedildi, ajan bir varsayılan seçip işi bitirdi. Runner reddi gördüğü için görev `waiting_decision` oldu ve iş commit'lenmedi. `--tools` ile bu araç artık hiç sunulmuyor. Açık soru: ajanın soruları KARAR akışına (Aşama 9) bağlanmalı mı? `AskUserQuestion` girdisi zaten soru + seçenekler biçiminde.
+
+## 14. Pano arayüzü (Aşama 6)
+
+CLI davranışının arayüze yansıyan kısımları:
+
+- **İlerleme yüzdesi yok.** Stream'de ne yüzde ne de kalan iş tahmini var. Çalışan işin ilerleme çubuğu bu yüzden belirsiz (`aria-valuenow` yok); yalnızca biten iş dolu gösterilir. Kartta "ne yapıyor" satırı, canlı akıştaki son `tool_use` olayından gelir.
+- **Maliyet yalnızca `result` ile gelir.** `costUsd` run bitene kadar `null`; "Bugün" hapı yalnızca bugün başlayan ve maliyeti bilinen run'ları toplar, tahmin göstermez.
+- **Canlı güncelleme yoklamasız.** Etkin her run için tek bir `EventSource` açılır (birden çok bileşen aynı akışı paylaşır). `end` olayında görev ve run listeleri yenilenir; commit `end`'den hemen sonra yazıldığı için 1,5 sn sonra bir kez daha yenilenir. Aşama 5'teki 2 sn'lik görev yoklaması kaldırıldı; yalnızca menüdeki bağlantı kartı 30 sn'de bir `/health` soruyor.
+- **Olayların zaman damgası yok.** SSE olayı `seq` ve `AgentEvent` taşır; log panelindeki satırlarda tasarımdaki saat sütunu bu yüzden gösterilmiyor.
