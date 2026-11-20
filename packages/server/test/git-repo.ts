@@ -50,11 +50,11 @@ export function makeTestRepo(files: Record<string, string> = {}): TestRepo {
 }
 
 /** Everything a user would notice about their checkout. */
-export function snapshotUserRepo(repo: string) {
+export function snapshotUserRepo(repo: string, mainBranch = 'main') {
   return {
     branch: gitSync(repo, 'symbolic-ref', '--short', 'HEAD'),
     head: gitSync(repo, 'rev-parse', 'HEAD'),
-    mainRef: gitSync(repo, 'rev-parse', 'refs/heads/main'),
+    mainRef: gitSync(repo, 'rev-parse', `refs/heads/${mainBranch}`),
     status: gitSync(repo, 'status', '--porcelain', '--untracked-files=all'),
   };
 }

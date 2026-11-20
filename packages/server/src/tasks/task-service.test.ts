@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { gitSync, makeTestRepo, snapshotUserRepo, type TestRepo } from '../../test/git-repo.js';
 import { fakeClaude, FIXTURES, waitFor } from '../../test/helpers.js';
 import { openDatabase, type DbHandle } from '../db/index.js';
-import { getTask } from '../db/repository.js';
+import { getProject, getTask } from '../db/repository.js';
 import { Runner } from '../runner/runner.js';
 import { buildClaudeArgs } from '../runner/claude-cli.js';
 import { DEFAULT_AGENT_OPTIONS, ServiceError, TaskService } from './task-service.js';
@@ -14,6 +14,8 @@ let db: DbHandle;
 let runner: Runner;
 let service: TaskService;
 let before: ReturnType<typeof snapshotUserRepo>;
+/** The user's main branch name, for the after-test check (one test renames it). */
+let userMain = 'main';
 
 interface FakeOptions {
   fixture?: string;
@@ -49,10 +51,11 @@ afterEach(async () => {
   db.close();
   try {
     // Nothing Squadboard does may change the user's checkout.
-    expect(snapshotUserRepo(t.repo)).toEqual(before);
+    expect(snapshotUserRepo(t.repo, userMain)).toEqual(before);
   } finally {
     rmSync(t.dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     t = undefined;
+    userMain = 'main';
   }
 });
 
@@ -81,28 +84,108 @@ describe('projects', () => {
     expect((await service.addProject(join(r.repo, 'src'))).id).toBe(project.id);
   });
 
-  it('rejects relative paths, plain folders, empty repos and Squadboard worktrees', async () => {
+  it('rejects relative paths, plain folders and Squadboard worktrees, in Turkish', async () => {
     const r = setup();
     await expectServiceError(service.addProject('relative/dir'), 400);
     const plain = join(r.dir, 'plain');
     mkdirSync(plain);
     expect((await expectServiceError(service.addProject(plain), 400)).message).toMatch(
-      /Not a git repository/,
-    );
-    const empty = join(r.dir, 'empty');
-    mkdirSync(empty);
-    gitSync(empty, 'init', '--quiet');
-    expect((await expectServiceError(service.addProject(empty), 400)).message).toMatch(
-      /no commits/,
+      /git deposu değil/,
     );
 
     const project = await service.addProject(r.repo);
-    const created = service.createTask(project.id, { title: 'A', prompt: 'x', agent: 'backend' });
+    const created = await service.createTask(project.id, {
+      title: 'A',
+      prompt: 'x',
+      agent: 'backend',
+    });
     await (
       await service.startTask(created.id)
     ).done;
     const wt = task(created.id).worktreePath ?? '';
     expect((await expectServiceError(service.addProject(wt), 400)).message).toMatch(/worktree/);
+  });
+
+  it('accepts a repository without commits, but tasks cannot start until the first commit', async () => {
+    const r = setup();
+    const empty = join(r.dir, 'empty');
+    mkdirSync(empty);
+    gitSync(empty, 'init', '--quiet', '--initial-branch=trunk');
+    const project = await service.addProject(empty);
+    expect(project.mainBranch).toBe('trunk');
+    const created = await service.createTask(project.id, { title: 'A', prompt: 'x', agent: 'x' });
+    const err = await expectServiceError(service.startTask(created.id), 409);
+    expect(err.message).toMatch(/henüz commit yok/);
+  });
+
+  it('forgets a project without touching its folder; refuses while a task runs', async () => {
+    const r = setup({ hang: true });
+    const project = await service.addProject(r.repo);
+    const created = await service.createTask(project.id, { title: 'A', prompt: 'x', agent: 'x' });
+    const handle = await service.startTask(created.id);
+    await waitFor(() => (existsSync(join(r.dir, 'pids.json')) ? true : undefined));
+    expect(
+      (await expectServiceError(() => service.deleteProject(project.id), 409)).message,
+    ).toMatch(/çalışan bir görev/);
+    await service.stopTask(created.id);
+    await handle.done;
+
+    service.deleteProject(project.id);
+    expect(getTask(db.db, created.id)).toBeUndefined();
+    expect(existsSync(join(r.repo, 'README.md'))).toBe(true);
+    await expectServiceError(() => service.deleteProject(project.id), 404);
+  }, 20_000);
+});
+
+describe('main branch', () => {
+  it('is detected again when the stored one is gone (main stored, repo uses master)', async () => {
+    const r = setup();
+    const project = await service.addProject(r.repo);
+    // The finsight case: Squadboard knows "main", the repository only has "master".
+    gitSync(r.repo, 'branch', '-m', 'main', 'master');
+    userMain = 'master';
+    before = snapshotUserRepo(r.repo, userMain);
+    expect(project.mainBranch).toBe('main');
+
+    const created = await service.createTask(project.id, { title: 'A', prompt: 'x', agent: 'x' });
+    expect(getProject(db.db, project.id)?.mainBranch).toBe('master');
+    await (
+      await service.startTask(created.id)
+    ).done;
+    expect(task(created.id)).toMatchObject({ baseRef: 'master', status: 'in_review' });
+  });
+
+  it('prefers the stored branch while it exists, even if another one is checked out', async () => {
+    const r = setup();
+    const project = await service.addProject(r.repo);
+    gitSync(r.repo, 'checkout', '--quiet', '-b', 'feature');
+    before = snapshotUserRepo(r.repo);
+    const created = await service.createTask(project.id, { title: 'A', prompt: 'x', agent: 'x' });
+    await (
+      await service.startTask(created.id)
+    ).done;
+    expect(task(created.id).baseRef).toBe('main');
+  });
+
+  it('explains a git failure in Turkish and keeps the raw message as detail', async () => {
+    const r = setup();
+    const project = await service.addProject(r.repo);
+    const dep = await service.createTask(project.id, { title: 'Dep', prompt: 'x', agent: 'x' });
+    await (
+      await service.startTask(dep.id)
+    ).done;
+    const created = await service.createTask(project.id, {
+      title: 'B',
+      prompt: 'x',
+      agent: 'x',
+      dependsOn: dep.id,
+    });
+    // The dependency's branch disappears behind Squadboard's back.
+    await service.cleanupTask(dep.id);
+    gitSync(r.repo, 'branch', '-D', task(dep.id).branch ?? '');
+    const err = await expectServiceError(service.startTask(created.id), 409);
+    expect(err.message).toMatch(/^Çalışma klasörü açılamadı\. ".+" diye bir dal bulunamadı/);
+    expect(err.detail).toMatch(/git rev-parse/);
   });
 });
 
@@ -110,8 +193,12 @@ describe('tasks in worktrees', () => {
   it('two tasks run at the same time in separate worktrees; the user checkout never changes', async () => {
     const r = setup({ delayMs: 60, write: { 'notes/agent.md': 'written by the agent\n' } });
     const project = await service.addProject(r.repo);
-    const a = service.createTask(project.id, { title: 'Giriş API', prompt: 'a', agent: 'backend' });
-    const b = service.createTask(project.id, {
+    const a = await service.createTask(project.id, {
+      title: 'Giriş API',
+      prompt: 'a',
+      agent: 'backend',
+    });
+    const b = await service.createTask(project.id, {
       title: 'Giriş formu',
       prompt: 'b',
       agent: 'frontend',
@@ -155,7 +242,7 @@ describe('tasks in worktrees', () => {
   it('marks files outside expectedFiles as unexpected', async () => {
     const r = setup({ write: { 'src/api.ts': 'export {}', 'docs/extra.md': 'x' } });
     const project = await service.addProject(r.repo);
-    const strict = service.createTask(project.id, {
+    const strict = await service.createTask(project.id, {
       title: 'API',
       prompt: 'x',
       agent: 'backend',
@@ -169,7 +256,11 @@ describe('tasks in worktrees', () => {
       unexpectedFiles: ['docs/extra.md'],
     });
 
-    const open = service.createTask(project.id, { title: 'Any', prompt: 'x', agent: 'backend' });
+    const open = await service.createTask(project.id, {
+      title: 'Any',
+      prompt: 'x',
+      agent: 'backend',
+    });
     await (
       await service.startTask(open.id)
     ).done;
@@ -179,12 +270,12 @@ describe('tasks in worktrees', () => {
   it('stacked: a dependent task waits, then starts from the dependency branch', async () => {
     const r = setup({ write: { 'db/schema.sql': 'create table users();' } });
     const project = await service.addProject(r.repo);
-    const db1 = service.createTask(project.id, {
+    const db1 = await service.createTask(project.id, {
       title: 'Tablolar',
       prompt: 'db',
       agent: 'database',
     });
-    const api = service.createTask(project.id, {
+    const api = await service.createTask(project.id, {
       title: 'API',
       prompt: 'api',
       agent: 'backend',
@@ -213,8 +304,7 @@ describe('tasks in worktrees', () => {
     const r = setup();
     const project = await service.addProject(r.repo);
     await expectServiceError(
-      () =>
-        service.createTask(project.id, { title: 'x', prompt: 'x', agent: 'a', dependsOn: 'nope' }),
+      service.createTask(project.id, { title: 'x', prompt: 'x', agent: 'a', dependsOn: 'nope' }),
       400,
     );
   });
@@ -222,7 +312,7 @@ describe('tasks in worktrees', () => {
   it('stop: task becomes stopped, its uncommitted changes are recorded but not committed', async () => {
     const r = setup({ hang: true, write: { 'wip.txt': 'half done' } });
     const project = await service.addProject(r.repo);
-    const created = service.createTask(project.id, {
+    const created = await service.createTask(project.id, {
       title: 'Long',
       prompt: 'x',
       agent: 'backend',
@@ -253,7 +343,11 @@ describe('tasks left over from the Stage 4 prototype', () => {
   it('never run in or clean up the user folder stored as their worktree', async () => {
     const r = setup({ write: { 'prototype.txt': 'agent output' } });
     const project = await service.addProject(r.repo);
-    const legacy = service.createTask(project.id, { title: 'Old', prompt: 'x', agent: 'general' });
+    const legacy = await service.createTask(project.id, {
+      title: 'Old',
+      prompt: 'x',
+      agent: 'general',
+    });
     // Stage 4 stored the user's own folder as the task's working directory.
     db.sqlite
       .prepare('update tasks set worktree_path = ?, status = ? where id = ?')
@@ -277,7 +371,7 @@ describe('cleanup', () => {
   it('removes the worktree and keeps the branch (with the committed work) by default', async () => {
     const r = setup({ write: { 'feature.txt': 'done' } });
     const project = await service.addProject(r.repo);
-    const created = service.createTask(project.id, {
+    const created = await service.createTask(project.id, {
       title: 'Feature',
       prompt: 'x',
       agent: 'backend',
@@ -297,8 +391,12 @@ describe('cleanup', () => {
   it('can delete the branch too, unless a dependent task still needs it', async () => {
     const r = setup();
     const project = await service.addProject(r.repo);
-    const first = service.createTask(project.id, { title: 'First', prompt: 'x', agent: 'backend' });
-    service.createTask(project.id, {
+    const first = await service.createTask(project.id, {
+      title: 'First',
+      prompt: 'x',
+      agent: 'backend',
+    });
+    await service.createTask(project.id, {
       title: 'Second',
       prompt: 'x',
       agent: 'backend',
@@ -312,7 +410,11 @@ describe('cleanup', () => {
     await expectServiceError(service.cleanupTask(first.id, { deleteBranch: true }), 409);
     expect(gitSync(r.repo, 'branch', '--list', branch)).toContain(branch);
 
-    const solo = service.createTask(project.id, { title: 'Solo', prompt: 'x', agent: 'backend' });
+    const solo = await service.createTask(project.id, {
+      title: 'Solo',
+      prompt: 'x',
+      agent: 'backend',
+    });
     await (
       await service.startTask(solo.id)
     ).done;
@@ -325,7 +427,7 @@ describe('cleanup', () => {
   it('refuses to clean up a running task', async () => {
     const r = setup({ hang: true });
     const project = await service.addProject(r.repo);
-    const created = service.createTask(project.id, {
+    const created = await service.createTask(project.id, {
       title: 'Busy',
       prompt: 'x',
       agent: 'backend',
@@ -338,7 +440,7 @@ describe('cleanup', () => {
   it('a cleaned-up task can be started again: the worktree is re-created on its branch', async () => {
     const r = setup({ write: { 'again.txt': 'x' } });
     const project = await service.addProject(r.repo);
-    const created = service.createTask(project.id, {
+    const created = await service.createTask(project.id, {
       title: 'Again',
       prompt: 'x',
       agent: 'backend',
