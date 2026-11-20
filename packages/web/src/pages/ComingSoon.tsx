@@ -4,13 +4,12 @@ import type { Page } from '../lib/router';
 import { EmptyState } from '../ui/EmptyState';
 
 const LINES: Partial<Record<Page, string>> = {
-  ekip: 'Ajanlarını açıp kapatacağın, talimatlarını düzenleyeceğin yer.',
   gecmis: 'Biten işlerin, kararların ve birleştirmelerin listesi.',
   harcama: 'Günlük ve iş başına harcadığın kredi.',
   ayarlar: 'Proje, model ve onay ayarları.',
 };
 
-/** Pages whose content comes in later stages: the menu and route work, the page says so. */
+/** Pages whose content is not built yet: the menu and route work, the page says so. */
 export function ComingSoon({ page }: { page: Page }) {
   const item = NAV.find((n) => n.page === page);
   const title = item?.label ?? '';

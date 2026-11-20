@@ -13,7 +13,7 @@ import type { TaskView } from '../api';
 import { CleanupDialog } from '../components/CleanupDialog';
 import { EventLine } from '../EventLine';
 import { STARTABLE, formatDuration, formatUsd } from '../format';
-import { agentMeta, agentName } from '../lib/agents';
+import { agentName, useAgents } from '../lib/agents';
 import { taskLook } from '../lib/board';
 import { useApi, useLiveTask, useTaskActions } from '../lib/queries';
 import { navigate } from '../lib/router';
@@ -22,6 +22,7 @@ import { useUi } from '../lib/store';
 import { AgentAvatar } from '../ui/AgentAvatar';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
+import { ErrorMessage } from '../ui/ErrorMessage';
 import { DarkLogPanel } from '../ui/DarkLogPanel';
 import { StatusPill } from '../ui/Pill';
 import { ProgressBar } from '../ui/ProgressBar';
@@ -33,7 +34,7 @@ type Tab = 'logs' | 'files' | 'summary';
 /** Agent detail (v2-04): task list on the left, live output with Loglar / Dosyalar / Özet. */
 export function TaskDetail({ task, tasks }: { task: TaskView; tasks: readonly TaskView[] }) {
   const mode = useUi((s) => s.nameMode);
-  const agent = agentMeta(task.agent);
+  const agent = useAgents().byId(task.agent);
   const name = agentName(agent, mode);
   const look = taskLook(task);
 
@@ -69,11 +70,12 @@ export function TaskDetail({ task, tasks }: { task: TaskView; tasks: readonly Ta
 
 function TaskList({ tasks, selectedId }: { tasks: readonly TaskView[]; selectedId: string }) {
   const mode = useUi((s) => s.nameMode);
+  const agents = useAgents();
   return (
     <Card padding="sm" as="section" aria-label="Görevler">
       <ul className="flex flex-col gap-1">
         {tasks.map((t) => {
-          const agent = agentMeta(t.agent);
+          const agent = agents.byId(t.agent);
           const look = taskLook(t);
           const selected = t.id === selectedId;
           return (
@@ -147,7 +149,7 @@ function ProgressCard({ task }: { task: TaskView }) {
 function OutputPanel({ task }: { task: TaskView }) {
   const api = useApi();
   const mode = useUi((s) => s.nameMode);
-  const agent = agentMeta(task.agent);
+  const agent = useAgents().byId(task.agent);
   const look = taskLook(task);
   const [tab, setTab] = useState<Tab>('logs');
   const [cleaning, setCleaning] = useState(false);
@@ -202,11 +204,7 @@ function OutputPanel({ task }: { task: TaskView }) {
           </Button>
         )}
       </div>
-      {error && (
-        <p role="alert" className="w-full font-semibold text-console-danger">
-          {error.message}
-        </p>
-      )}
+      {error && <ErrorMessage error={error} tone="dark" className="w-full" />}
     </div>
   );
 
@@ -315,7 +313,9 @@ function Summary({ task, events }: { task: TaskView; events: Events }) {
         <dd className="text-console-ink">{task.changedFiles.length}</dd>
       </dl>
       {run.error && <p className="text-console-danger">{run.error}</p>}
-      {task.gitError && <p className="text-console-danger">Git: {task.gitError}</p>}
+      {task.gitError && (
+        <ErrorMessage error={task.gitError} detail={task.gitErrorDetail} tone="dark" />
+      )}
     </div>
   );
 }

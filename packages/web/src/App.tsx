@@ -6,6 +6,7 @@ import { ApiContext, createQueryClient } from './lib/queries';
 import { useRoute } from './lib/router';
 import { BoardPage } from './pages/BoardPage';
 import { ComingSoon } from './pages/ComingSoon';
+import { TeamPage } from './pages/TeamPage';
 import { AppShell } from './shell/AppShell';
 import { EmptyState } from './ui/EmptyState';
 
@@ -31,7 +32,9 @@ export function App() {
 
 function Pages() {
   const { page } = useRoute();
-  return page === 'pano' ? <BoardPage /> : <ComingSoon page={page} />;
+  if (page === 'pano') return <BoardPage />;
+  if (page === 'ekip') return <TeamPage />;
+  return <ComingSoon page={page} />;
 }
 
 function MissingToken() {

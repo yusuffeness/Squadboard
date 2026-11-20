@@ -19,7 +19,7 @@ export function Switch({
       aria-label={label}
       disabled={disabled}
       onClick={() => onChange(!checked)}
-      className="inline-flex min-h-11 min-w-11 items-center disabled:cursor-not-allowed disabled:opacity-50"
+      className="inline-flex min-h-11 min-w-11 shrink-0 items-center disabled:cursor-not-allowed disabled:opacity-50"
     >
       <span
         aria-hidden

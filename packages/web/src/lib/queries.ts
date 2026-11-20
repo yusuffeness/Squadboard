@@ -6,7 +6,8 @@ import {
   type QueryClient as Client,
 } from '@tanstack/react-query';
 import { createContext, useContext, useEffect } from 'react';
-import type { Api, NewTask, TaskView } from '../api';
+import type { ProjectSettings } from '@squadboard/core';
+import type { AgentPatch, Api, InstallTeam, NewTask, TaskView, TeamState } from '../api';
 import { useRunStream } from './run-streams';
 
 export const ApiContext = createContext<Api | null>(null);
@@ -31,6 +32,9 @@ export const keys = {
   projects: ['projects'] as const,
   tasks: (projectId: string) => ['tasks', projectId] as const,
   runs: ['runs'] as const,
+  templates: ['templates'] as const,
+  team: (projectId: string) => ['team', projectId] as const,
+  checks: (projectId: string) => ['checks', projectId] as const,
 };
 
 export function useHealth() {
@@ -77,6 +81,75 @@ export function useAddProject() {
   return useMutation({
     mutationFn: (path: string) => api.addProject(path),
     onSuccess: () => void client.invalidateQueries({ queryKey: keys.projects }),
+  });
+}
+
+export function useDeleteProject() {
+  const api = useApi();
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteProject(id),
+    onSettled: () => void client.invalidateQueries({ queryKey: keys.projects }),
+  });
+}
+
+export function useTemplates() {
+  const api = useApi();
+  return useQuery({ queryKey: keys.templates, queryFn: api.listTemplates, staleTime: Infinity });
+}
+
+/** The project's `.team/` (missing, invalid or ok). Re-read on focus: users edit it by hand. */
+export function useTeam(projectId: string | null) {
+  const api = useApi();
+  return useQuery({
+    queryKey: keys.team(projectId ?? ''),
+    queryFn: () => api.getTeam(projectId ?? ''),
+    enabled: projectId !== null,
+    staleTime: 5_000,
+  });
+}
+
+export function useChecks(projectId: string | null) {
+  const api = useApi();
+  return useQuery({
+    queryKey: keys.checks(projectId ?? ''),
+    queryFn: () => api.getChecks(projectId ?? ''),
+    enabled: projectId !== null,
+    staleTime: 5_000,
+  });
+}
+
+/** Team writes return the new team; put it in the cache so every page sees it at once. */
+function putTeam(client: Client, projectId: string, state: TeamState) {
+  client.setQueryData(keys.team(projectId), state);
+  void client.invalidateQueries({ queryKey: keys.checks(projectId) });
+}
+
+export function useInstallTeam(projectId: string) {
+  const api = useApi();
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (input: InstallTeam) => api.installTeam(projectId, input),
+    onSuccess: (result) => putTeam(client, projectId, result.state),
+  });
+}
+
+export function useUpdateAgent(projectId: string) {
+  const api = useApi();
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ agentId, patch }: { agentId: string; patch: AgentPatch }) =>
+      api.updateAgent(projectId, agentId, patch),
+    onSuccess: (team) => putTeam(client, projectId, { status: 'ok', team }),
+  });
+}
+
+export function useUpdateTeamSettings(projectId: string) {
+  const api = useApi();
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (settings: Partial<ProjectSettings>) => api.updateTeamSettings(projectId, settings),
+    onSuccess: (team) => putTeam(client, projectId, { status: 'ok', team }),
   });
 }
 

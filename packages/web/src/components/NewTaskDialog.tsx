@@ -1,12 +1,13 @@
 import { ArrowRight, ChevronDown } from 'lucide-react';
 import { useId, useState, type FormEvent } from 'react';
 import type { TaskView } from '../api';
-import { ASSIGNABLE, agentName } from '../lib/agents';
+import { agentName, useAgents } from '../lib/agents';
 import { titleFromPrompt } from '../lib/board';
 import { useCreateTask } from '../lib/queries';
 import { useUi } from '../lib/store';
 import { AgentAvatar } from '../ui/AgentAvatar';
 import { Button } from '../ui/Button';
+import { ErrorMessage } from '../ui/ErrorMessage';
 import { Dialog } from '../ui/Dialog';
 import { OptionCard } from '../ui/OptionCard';
 
@@ -62,8 +63,11 @@ function NewTaskForm({
   onDone: () => void;
 }) {
   const mode = useUi((s) => s.nameMode);
+  const agents = useAgents();
   const [prompt, setPrompt] = useState(initialPrompt);
-  const [agent, setAgent] = useState(initialAgent ?? 'general');
+  const [agent, setAgent] = useState(() =>
+    initialAgent && agents.assignable.some((a) => a.id === initialAgent) ? initialAgent : 'general',
+  );
   const [title, setTitle] = useState('');
   const [expected, setExpected] = useState('');
   const [dependsOn, setDependsOn] = useState('');
@@ -114,7 +118,7 @@ function NewTaskForm({
       <fieldset>
         <legend className="mb-2 font-bold">Kim yapsın?</legend>
         <div role="radiogroup" aria-label="Ajan" className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-          {ASSIGNABLE.map((a) => (
+          {agents.assignable.map((a) => (
             <OptionCard
               key={a.id}
               label={agentName(a, mode)}
@@ -175,11 +179,7 @@ function NewTaskForm({
         </div>
       </details>
 
-      {create.isError && (
-        <p role="alert" className="font-semibold text-danger">
-          Oluşturulamadı: {create.error.message}
-        </p>
-      )}
+      {create.isError && <ErrorMessage error={create.error} prefix="Oluşturulamadı:" />}
 
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
         <Button variant="ghost" onClick={onDone}>

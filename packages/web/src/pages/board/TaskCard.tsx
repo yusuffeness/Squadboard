@@ -12,20 +12,22 @@ import {
 import type { ReactNode } from 'react';
 import type { TaskView } from '../../api';
 import { STARTABLE, summarizeToolInput } from '../../format';
-import { agentMeta, agentName } from '../../lib/agents';
+import { agentName, useAgents } from '../../lib/agents';
 import { taskLook } from '../../lib/board';
 import { useLiveTask, useTaskActions } from '../../lib/queries';
 import { navigate } from '../../lib/router';
 import { useUi } from '../../lib/store';
 import { AgentChip } from '../../ui/AgentAvatar';
 import { Button } from '../../ui/Button';
+import { ErrorMessage } from '../../ui/ErrorMessage';
 import { StatusPill } from '../../ui/Pill';
 import { ProgressBar } from '../../ui/ProgressBar';
 
 /** One task on the board (v2-01 cards): agent, title, branch, files, progress, actions. */
 export function TaskCard({ task, all }: { task: TaskView; all: readonly TaskView[] }) {
   const mode = useUi((s) => s.nameMode);
-  const agent = agentMeta(task.agent);
+  const agents = useAgents();
+  const agent = agents.byId(task.agent);
   const look = taskLook(task);
   const actions = useTaskActions(task.projectId);
   const stream = useLiveTask(task);
@@ -48,7 +50,8 @@ export function TaskCard({ task, all }: { task: TaskView; all: readonly TaskView
   return (
     <article
       data-testid="task-card"
-      className={`flex flex-col gap-3 rounded-tile border border-l-4 border-line bg-surface p-4 shadow-card ${agent.edge} ${
+      style={{ borderLeftColor: agent.color }}
+      className={`flex flex-col gap-3 rounded-tile border border-l-4 border-line bg-surface p-4 shadow-card ${
         task.status === 'failed' && !task.active ? 'ring-1 ring-danger/30' : ''
       }`}
     >
@@ -74,7 +77,7 @@ export function TaskCard({ task, all }: { task: TaskView; all: readonly TaskView
       <ul className="flex flex-col gap-1.5 text-sm text-muted empty:hidden">
         {task.status === 'blocked' && deps.length > 0 && (
           <Meta icon={Clock}>
-            {deps.map((d) => `${agentName(agentMeta(d.agent), mode)}: ${d.title}`).join(', ')}{' '}
+            {deps.map((d) => `${agentName(agents.byId(d.agent), mode)}: ${d.title}`).join(', ')}{' '}
             bitince başlar
           </Meta>
         )}
@@ -98,7 +101,7 @@ export function TaskCard({ task, all }: { task: TaskView; all: readonly TaskView
         )}
         {task.gitError && (
           <Meta icon={TriangleAlert} tone="danger">
-            Git: {task.gitError}
+            {task.gitError}
           </Meta>
         )}
         {task.active && doing && (
@@ -110,11 +113,7 @@ export function TaskCard({ task, all }: { task: TaskView; all: readonly TaskView
 
       {task.active && <ProgressBar value={null} label={`${task.title} sürüyor`} />}
 
-      {error && (
-        <p role="alert" className="text-sm font-semibold text-danger">
-          {error.message}
-        </p>
-      )}
+      {error && <ErrorMessage error={error} className="text-sm" />}
 
       <div className="flex flex-wrap gap-2">
         {task.active && (

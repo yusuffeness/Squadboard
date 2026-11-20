@@ -1,4 +1,4 @@
-import type { AgentEvent, RunStatus, TaskStatus } from '@squadboard/core';
+import type { AgentEvent, ProjectSettings, RunStatus, TaskStatus } from '@squadboard/core';
 
 /**
  * The session token comes from the URL fragment (`#token=…`) that `squadboard` printed.
@@ -34,6 +34,8 @@ export interface ProjectView {
   mainBranch: string;
   /** false: the user has uncommitted changes, which agents do not see. */
   clean: boolean | null;
+  /** false for a fresh repository: tasks start only after the first commit. */
+  hasCommits: boolean;
   taskCount: number;
   createdAt: string;
 }
@@ -53,10 +55,75 @@ export interface TaskView {
   baseRef: string | null;
   changedFiles: string[];
   unexpectedFiles: string[];
+  /** Turkish for the common git failures. */
   gitError: string | null;
+  /** git's own message behind gitError ("Ayrıntı"). */
+  gitErrorDetail: string | null;
   createdAt: string;
   active: boolean;
   latestRun: RunView | null;
+}
+
+/** Mirrors AgentView in packages/server/src/team/team-service.ts. */
+export interface AgentView {
+  id: string;
+  file: string;
+  names: { tech: string; friendly: string };
+  color: string;
+  owns: string[];
+  enabled: boolean;
+  budgetUsd: number;
+  description: string;
+  tools: string[] | null;
+  model: string | null;
+  permissionMode: string | null;
+  prompt: string;
+  readOnly: boolean;
+}
+
+export interface TeamView {
+  id: string;
+  name: string;
+  description: string | null;
+  settings: ProjectSettings;
+  agents: AgentView[];
+}
+
+export type TeamState =
+  { status: 'missing' } | { status: 'invalid'; error: string } | { status: 'ok'; team: TeamView };
+
+export interface TemplateView extends TeamView {
+  files: string[];
+}
+
+/** Mirrors ProjectChecks in packages/server/src/routes/team.ts. */
+export interface ProjectChecks {
+  path: string;
+  isRepo: boolean;
+  mainBranch: string;
+  hasCommits: boolean;
+  changes: number | null;
+  claude: { ok: boolean; version: string | null };
+}
+
+export interface InstallTeam {
+  templateId: string;
+  agents: string[];
+  settings: Partial<ProjectSettings>;
+  overwrite: boolean;
+}
+
+export interface InstallResult {
+  written: string[];
+  unchanged: string[];
+  state: TeamState;
+}
+
+export interface AgentPatch {
+  enabled?: boolean;
+  names?: { tech?: string; friendly?: string };
+  prompt?: string;
+  model?: string | null;
 }
 
 export interface NewTask {
@@ -72,17 +139,23 @@ export interface StreamedEvent {
   event: AgentEvent;
 }
 
+/** `message` is the server's sentence for the user; `detail` the raw cause (e.g. git output). */
 export class ApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    readonly detail: string | null = null,
+    /** Files that already exist with other content (team install, 409). */
+    readonly conflicts: string[] = [],
   ) {
     super(message);
   }
 }
 
+type Method = 'GET' | 'POST' | 'PATCH' | 'DELETE';
+
 export function createApi(token: string) {
-  async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
+  async function request<T>(method: Method, path: string, body?: unknown): Promise<T> {
     const headers: Record<string, string> = { authorization: `Bearer ${token}` };
     const init: RequestInit = { method, headers };
     if (body !== undefined) {
@@ -95,8 +168,19 @@ export function createApi(token: string) {
     } catch {
       throw new ApiError(0, 'Sunucuya ulaşılamıyor.');
     }
-    const data = (await res.json().catch(() => ({}))) as { error?: string };
-    if (!res.ok) throw new ApiError(res.status, data.error ?? `HTTP ${res.status}`);
+    const data = (await res.json().catch(() => ({}))) as {
+      error?: string;
+      detail?: string;
+      conflicts?: string[];
+    };
+    if (!res.ok) {
+      throw new ApiError(
+        res.status,
+        data.error ?? `HTTP ${res.status}`,
+        data.detail ?? null,
+        data.conflicts ?? [],
+      );
+    }
     return data as T;
   }
 
@@ -107,6 +191,18 @@ export function createApi(token: string) {
     listProjects: () =>
       request<{ projects: ProjectView[] }>('GET', '/api/projects').then((r) => r.projects),
     addProject: (path: string) => request<ProjectView>('POST', '/api/projects', { path }),
+    deleteProject: (id: string) => request<unknown>('DELETE', `/api/projects/${id}`),
+    listTemplates: () =>
+      request<{ templates: TemplateView[] }>('GET', '/api/templates').then((r) => r.templates),
+    getTeam: (projectId: string) => request<TeamState>('GET', `/api/projects/${projectId}/team`),
+    getChecks: (projectId: string) =>
+      request<ProjectChecks>('GET', `/api/projects/${projectId}/checks`),
+    installTeam: (projectId: string, input: InstallTeam) =>
+      request<InstallResult>('POST', `/api/projects/${projectId}/team/install`, input),
+    updateTeamSettings: (projectId: string, settings: Partial<ProjectSettings>) =>
+      request<TeamView>('PATCH', `/api/projects/${projectId}/team/settings`, settings),
+    updateAgent: (projectId: string, agentId: string, patch: AgentPatch) =>
+      request<TeamView>('PATCH', `/api/projects/${projectId}/team/agents/${agentId}`, patch),
     listTasks: (projectId: string) =>
       request<{ tasks: TaskView[] }>('GET', `/api/projects/${projectId}/tasks`).then(
         (r) => r.tasks,

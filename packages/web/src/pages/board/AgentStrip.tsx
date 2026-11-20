@@ -1,5 +1,5 @@
 import type { TaskView } from '../../api';
-import { TEAM, agentName } from '../../lib/agents';
+import { agentName, useAgents } from '../../lib/agents';
 import { agentState } from '../../lib/board';
 import { useUi } from '../../lib/store';
 import { AgentAvatar } from '../../ui/AgentAvatar';
@@ -8,10 +8,11 @@ import { StatusDot } from '../../ui/Pill';
 /** Six agent tiles with what each is doing (v2-01). Scrolls sideways on narrow screens. */
 export function AgentStrip({ tasks }: { tasks: readonly TaskView[] }) {
   const mode = useUi((s) => s.nameMode);
+  const agents = useAgents();
   return (
     <section aria-label="Ekip">
       <ul className="-mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-1 sm:mx-0 sm:grid sm:grid-cols-3 sm:overflow-visible sm:px-0 xl:grid-cols-6 xl:gap-4">
-        {TEAM.map((agent) => {
+        {agents.team.map((agent) => {
           const state = agentState(agent.id, tasks);
           return (
             <li
