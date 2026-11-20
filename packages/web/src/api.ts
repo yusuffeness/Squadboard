@@ -89,13 +89,21 @@ export function createApi(token: string) {
       headers['content-type'] = 'application/json';
       init.body = JSON.stringify(body);
     }
-    const res = await fetch(path, init);
+    let res: Response;
+    try {
+      res = await fetch(path, init);
+    } catch {
+      throw new ApiError(0, 'Sunucuya ulaşılamıyor.');
+    }
     const data = (await res.json().catch(() => ({}))) as { error?: string };
     if (!res.ok) throw new ApiError(res.status, data.error ?? `HTTP ${res.status}`);
     return data as T;
   }
 
   return {
+    /** Server liveness (no token needed). Throws when the server is unreachable. */
+    health: () => request<{ status: string }>('GET', '/health'),
+    listRuns: () => request<{ runs: RunView[] }>('GET', '/api/runs').then((r) => r.runs),
     listProjects: () =>
       request<{ projects: ProjectView[] }>('GET', '/api/projects').then((r) => r.projects),
     addProject: (path: string) => request<ProjectView>('POST', '/api/projects', { path }),

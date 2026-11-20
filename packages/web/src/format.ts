@@ -1,43 +1,4 @@
-import type { RunStatus, TaskStatus } from '@squadboard/core';
-
-/** Status is always shown as text (not only colour), per the design's accessibility rules. */
-export const RUN_STATUS_LABEL: Record<RunStatus, string> = {
-  running: 'Çalışıyor',
-  succeeded: 'Bitti',
-  failed: 'Hata',
-  stopped: 'Durduruldu',
-};
-
-export const RUN_STATUS_CLASS: Record<RunStatus, string> = {
-  running: 'text-accent',
-  succeeded: 'text-success',
-  failed: 'text-danger',
-  stopped: 'text-ink/60',
-};
-
-export const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
-  planned: 'Planlandı',
-  blocked: 'Bekliyor',
-  running: 'Çalışıyor',
-  waiting_decision: 'Kararın lazım',
-  in_review: 'İncelemede',
-  changes_requested: 'Değişiklik istendi',
-  done: 'Bitti',
-  failed: 'Hata',
-  stopped: 'Durduruldu',
-};
-
-export const TASK_STATUS_CLASS: Record<TaskStatus, string> = {
-  planned: 'text-ink/70',
-  blocked: 'text-ink/50',
-  running: 'text-accent',
-  waiting_decision: 'text-warn',
-  in_review: 'text-success',
-  changes_requested: 'text-warn',
-  done: 'text-success',
-  failed: 'text-danger',
-  stopped: 'text-ink/60',
-};
+import type { TaskStatus } from '@squadboard/core';
 
 /** Statuses from which a task can be (re)started (mirrors the core state machine). */
 export const STARTABLE: readonly TaskStatus[] = [
@@ -60,15 +21,6 @@ export function formatDuration(startIso: string, endIso: string | null): string 
   return s < 60 ? `${s} sn` : `${Math.floor(s / 60)} dk ${s % 60} sn`;
 }
 
-export function formatTime(iso: string): string {
-  return new Date(iso).toLocaleString('tr-TR', {
-    day: '2-digit',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
 /** One-line summary of a tool call's input: the path, pattern or command it acts on. */
 export function summarizeToolInput(input: Record<string, unknown>): string {
   for (const key of ['file_path', 'notebook_path', 'path', 'pattern', 'command', 'url', 'query']) {
@@ -77,6 +29,17 @@ export function summarizeToolInput(input: Record<string, unknown>): string {
   }
   const json = JSON.stringify(input);
   return json.length > 120 ? `${json.slice(0, 120)}…` : json;
+}
+
+/** Dollar amount in Turkish style, as the design writes it: `$0,42`. */
+export function formatUsd(value: number): string {
+  return `$${value.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+/** Folder name of a project path (`C:\Users\sen\kafe-siparis` → `kafe-siparis`). */
+export function projectName(path: string): string {
+  const parts = path.split(/[\\/]+/).filter(Boolean);
+  return parts[parts.length - 1] ?? path;
 }
 
 export function firstLine(text: string, max = 160): string {
