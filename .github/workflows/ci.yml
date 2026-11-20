@@ -28,3 +28,10 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+
+      # UI smoke tests (API mocked in the page). Chromium only, Linux only: the layout does not
+      # depend on the OS and the browser download is slow on Windows runners.
+      - if: runner.os == 'Linux'
+        run: pnpm --filter @squadboard/web exec playwright install --with-deps chromium
+      - if: runner.os == 'Linux'
+        run: pnpm --filter @squadboard/web test:e2e
