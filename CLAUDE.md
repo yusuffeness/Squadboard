@@ -26,28 +26,30 @@ Teknik tasarım: `docs/ARCHITECTURE.md`. Her işe onu okuyarak başla.
 
 ## Test
 
-- Her aşamada yeni davranış testle gelir (Vitest; `core` ve `server`).
+- Her aşamada yeni davranış testle gelir (Vitest; `core`, `server` ve `web/src/lib`). Arayüz davranışı Playwright smoke testleriyle (`packages/web/e2e/`) sınanır.
 - Sunucu testleri `buildApp()` + `app.inject()` ile, port açmadan.
 - İş bitmeden önce hepsi geçmeli: `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`.
 
 ## Komutlar
 
-| Komut                                          | Ne yapar                                                                                                    |
-| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `pnpm dev`                                     | core'u build eder, server (4317) ve web'i (5173) birlikte başlatır; terminaldeki `#token=…` bağlantısını aç |
-| `pnpm start`                                   | Her şeyi build eder ve `squadboard` komutunu çalıştırır (tarayıcıyı açar)                                   |
-| `pnpm test`                                    | Vitest, tüm paketler                                                                                        |
-| `pnpm lint`                                    | ESLint + Prettier kontrolü                                                                                  |
-| `pnpm format`                                  | Prettier ile düzelt                                                                                         |
-| `pnpm typecheck`                               | `tsc --noEmit`, tüm paketler                                                                                |
-| `pnpm build`                                   | Tüm paketleri build eder                                                                                    |
-| `pnpm --filter @squadboard/server db:generate` | Şema değişince yeni SQL migration'ı üretir (`packages/server/drizzle/`)                                     |
-| `pnpm --filter @squadboard/server try`         | Gerçek `claude` ile tek bir görev çalıştırır (kredi harcar; elle deneme için)                               |
+| Komut                                          | Ne yapar                                                                                                                            |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm dev`                                     | core'u build eder, server (4317) ve web'i (5173) birlikte başlatır; terminaldeki `#token=…` bağlantısını aç                         |
+| `pnpm start`                                   | Her şeyi build eder ve `squadboard` komutunu çalıştırır (tarayıcıyı açar)                                                           |
+| `pnpm test`                                    | Vitest, tüm paketler                                                                                                                |
+| `pnpm --filter @squadboard/web test:e2e`       | Playwright smoke testleri (API sayfada taklit edilir; ilk seferde `pnpm --filter @squadboard/web exec playwright install chromium`) |
+| `pnpm lint`                                    | ESLint + Prettier kontrolü                                                                                                          |
+| `pnpm format`                                  | Prettier ile düzelt                                                                                                                 |
+| `pnpm typecheck`                               | `tsc --noEmit`, tüm paketler                                                                                                        |
+| `pnpm build`                                   | Tüm paketleri build eder                                                                                                            |
+| `pnpm --filter @squadboard/server db:generate` | Şema değişince yeni SQL migration'ı üretir (`packages/server/drizzle/`)                                                             |
+| `pnpm --filter @squadboard/server try`         | Gerçek `claude` ile tek bir görev çalıştırır (kredi harcar; elle deneme için)                                                       |
 
 ## Sürüm notları
 
 - TypeScript `~6.0` sabit: typescript-eslint 8 henüz TS 7'yi desteklemiyor.
 - Tailwind v4: config dosyası yok, token'lar CSS `@theme` içinde.
+- server `dev` script'i `node --watch --import tsx`, **`tsx watch` değil**: Windows'ta `tsx watch`, stdin açık bir pipe olunca (`pnpm --parallel` böyle verir) açılışta sessizce donuyor ve `pnpm dev` hiç bağlantı yazmıyor.
 - server, core'u derlenmiş `dist` üzerinden kullanır; server'ın `test` ve `typecheck` script'leri önce core'u build eder.
 - `better-sqlite3` hazır binary'lerle gelir. `onlyBuiltDependencies`'e **ekleme**: pnpm o zaman `node-gyp` çalıştırır ve C++ derleyicisi olmayan makinede kurulum kırılır.
 - Runner testleri gerçek CLI yerine `packages/server/test/fake-claude.mjs` kullanır; CLI'ın gerçek davranışı değişirse önce Aşama 1 kayıtlarını (`packages/core/test/fixtures/claude-cli/`) yenile.

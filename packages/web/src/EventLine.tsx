@@ -11,9 +11,7 @@ export function EventLine({ event }: { event: AgentEvent }) {
         </p>
       );
     case 'text':
-      return (
-        <p className="whitespace-pre-wrap font-sans text-base text-console-ink">{event.text}</p>
-      );
+      return <p className="whitespace-pre-wrap text-console-ink">{event.text}</p>;
     case 'thinking':
       return <p className="whitespace-pre-wrap italic text-console-muted">{event.text}</p>;
     case 'tool_use':

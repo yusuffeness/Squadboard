@@ -2,27 +2,109 @@
 @import '@fontsource-variable/nunito';
 @import '@fontsource-variable/jetbrains-mono';
 
-/* Design tokens (docs/ARCHITECTURE.md → Ekran tasarımları). Tailwind v4 reads its config from @theme. */
+/*
+ * Design tokens (docs/ARCHITECTURE.md → Ekran tasarımları, docs/design/v2-*.jpg).
+ * Tailwind v4 reads its config from @theme; components use these names only, never raw hex.
+ */
 @theme {
-  --color-bg: #f6f3ee;
+  /* Surfaces: peach page, warm white cards, sand for chips and quiet fills. */
+  --color-bg: #fcf3ec;
+  --color-surface: #fffcfa;
+  --color-sand: #f6ece4;
+  --color-line: #f0e2d7;
+  --color-line-strong: #e6d3c5;
+
+  /* Text. muted keeps ≥ 4.5:1 on bg, faint is for icons and decorative text only. */
   --color-ink: #1f2430;
+  --color-muted: #5d6270;
+  --color-faint: #a89d94;
+
   --color-accent: #e8664a;
+  --color-accent-strong: #c94f35;
+  --color-accent-soft: #fde8e1;
   --color-success: #2f9e6b;
+  --color-success-strong: #23805a;
+  --color-success-soft: #ddf2e7;
   --color-warn: #b26a00;
+  --color-warn-soft: #fdf0d5;
+  --color-warn-tint: #fff7e8;
   --color-danger: #c03a2b;
-  /* Live output panel: dark background (design: "Canlı çıktı koyu zeminli"). */
-  --color-console: #1b1f29;
-  --color-console-ink: #e7e4dd;
+  --color-danger-soft: #fbe3df;
+  --color-info: #2f5bd3;
+  --color-info-soft: #e5ecfe;
+  --color-review: #6f45cc;
+  --color-review-soft: #eee6fb;
+  --color-idle: #b9b0a8;
+
+  /* Agent pastels (avatars, card edges). */
+  --color-agent-planner: #9ed8e8;
+  --color-agent-frontend: #ffb38a;
+  --color-agent-backend: #8fb3ff;
+  --color-agent-database: #86d3ae;
+  --color-agent-test: #c6a8f0;
+  --color-agent-reviewer: #f5d27a;
+  --color-agent-general: #e8dcd2;
+
+  /* Page decoration: blurred circles behind everything. */
+  --color-blob-peach: #ffcfb8;
+  --color-blob-lilac: #e6d9f5;
+  --color-blob-mint: #e3eedf;
+
+  /* Live output panel. */
+  --color-console: #1d2130;
+  --color-console-raised: #2a2f40;
+  --color-console-ink: #e9e6df;
   --color-console-muted: #9aa0ad;
   --color-console-danger: #ff8a7a;
   --color-console-success: #6fd3a0;
+  --color-console-warn: #f2b84b;
 
   --font-sans: 'Nunito Variable', 'Nunito', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, monospace;
+
+  /* Smallest text is 13px (design rule), so text-xs is redefined. */
+  --text-xs: 0.8125rem;
+  --text-xs--line-height: 1.25rem;
+
+  --radius-card: 1.5rem;
+  --radius-tile: 1rem;
+
+  --shadow-card: 0 1px 2px rgb(120 80 50 / 0.04), 0 8px 24px rgb(120 80 50 / 0.06);
+  --shadow-pop: 0 12px 40px rgb(60 40 30 / 0.18);
+  --shadow-button: inset 0 -3px 0 rgb(0 0 0 / 0.14);
+
+  --animate-indeterminate: indeterminate 1.4s ease-in-out infinite;
+
+  @keyframes indeterminate {
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(250%);
+    }
+  }
 }
 
 @layer base {
   html {
     @apply bg-bg text-ink font-sans antialiased;
+  }
+
+  body {
+    @apply min-h-dvh overflow-x-hidden bg-bg;
+  }
+
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-accent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }
