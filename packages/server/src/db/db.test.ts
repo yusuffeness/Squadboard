@@ -53,6 +53,7 @@ describe('database', () => {
     expect(tables).toEqual([
       'decisions',
       'events',
+      'permission_requests',
       'projects',
       'requests',
       'reviews',

@@ -22,6 +22,13 @@
       "when": 1795277478401,
       "tag": "0002_plans",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1795291437377,
+      "tag": "0003_decisions_permissions",
+      "breakpoints": true
     }
   ]
 }

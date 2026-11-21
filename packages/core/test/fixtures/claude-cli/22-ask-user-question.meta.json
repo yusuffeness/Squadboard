@@ -1,0 +1,29 @@
+{
+  "name": "22-ask-user-question",
+  "claudeVersion": "2.1.150 (Claude Code)",
+  "platform": "win32",
+  "recordedOn": "2026-11-21",
+  "args": [
+    "-p",
+    "Add persistence to this project so that results of add() are stored and can be listed later.",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--strict-mcp-config",
+    "--permission-mode",
+    "acceptEdits",
+    "--allowedTools",
+    "Read,Edit,Write,Glob,Grep",
+    "--model",
+    "sonnet",
+    "--max-budget-usd",
+    "0.40",
+    "--tools",
+    "Read,Edit,Write,Glob,Grep,AskUserQuestion",
+    "--append-system-prompt",
+    "You are the Backend agent of this project.\nBefore you modify ANY file, check whether the task leaves any of these unspecified:\n- storage technology or file format\n- adding a new dependency or library\n- public API shape or function names\n- data schema\n- behaviour visible to end users\nIf ANY of them is unspecified, you must NOT pick a default yourself and must NOT modify files.\nStop immediately and call the AskUserQuestion tool ONCE with ALL open questions (2-4 options each).\nIn this environment the tool cannot show the questions itself; they are forwarded to the user.\nAfter the call, end your turn with one short sentence. The answers arrive as the next message.\nOnly if the task specifies all of the above, do the task without asking."
+  ],
+  "exitCode": 0,
+  "durationMs": 22618,
+  "stderr": ""
+}

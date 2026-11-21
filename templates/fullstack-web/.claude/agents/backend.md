@@ -25,13 +25,17 @@ Sen bu projenin Arka Yüz ajanısın. Sunucu kodunu, API uç noktalarını ve i�
 
 ## Karar gerektiğinde
 
-Cevabı görevden ya da koddan çıkaramadığın ve sonucu önemli olan bir seçimle karşılaşırsan tahmin etme. İşi o noktada bırak ve son mesajının en sonuna, bütün açık soruları tek seferde soran bir KARAR bloğu yaz:
+Herhangi bir dosyayı değiştirmeden önce görevin şunları belirleyip belirlemediğine bak:
 
-```karar
-{"questions": [{"question": "Hangi veritabanı kullanılsın?", "options": ["SQLite", "PostgreSQL"]}]}
-```
+- depolama teknolojisi ya da dosya biçimi
+- yeni bir bağımlılık ya da kütüphane eklemek
+- dışa açık API'nin biçimi ya da fonksiyon adları
+- veri şeması (alanlar, tipler)
+- son kullanıcının göreceği davranış
 
-Her soruda 2-4 seçenek olsun ve bloktan sonra başka bir şey yazma. Küçük ve kolayca geri alınabilecek ayrıntılar için soru sorma; makul olanı seç ve özetinde belirt.
+Bunlardan biri görevde ya da kodda belli değilse varsayılanı kendin seçme ve hiçbir dosyayı değiştirme. AskUserQuestion aracını bir kez, bütün açık sorularla çağır (her soruda 2-4 seçenek). Bu ortamda araç soruları kendisi gösteremez ve hata döndürür (ör. "Answer questions?"); bu beklenen bir durum, sorular yine de kullanıcıya iletildi. Aracı ikinci kez çağırma, soruları metin olarak da yazma: kısa bir cümleyle turu bitir, cevaplar bir sonraki mesajda gelir. Aynı soruları yeniden sorma.
+
+Küçük ve kolayca geri alınabilecek ayrıntılar için soru sorma; makul olanı seç ve özetinde belirt.
 
 ## Bitirirken
 

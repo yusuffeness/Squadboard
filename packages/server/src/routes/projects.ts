@@ -16,6 +16,12 @@ import { explainGitError } from '../git/errors.js';
 import { getRepoInfo, isClean } from '../git/git.js';
 import { INTERRUPTED_ERROR, type Runner } from '../runner/runner.js';
 import { ServiceError, type TaskService } from '../tasks/task-service.js';
+import {
+  pendingFor,
+  type AnswerInput,
+  type DecisionService,
+  type PendingView,
+} from '../decisions/decision-service.js';
 import type { RunView } from './runs.js';
 
 export interface ProjectView extends ProjectRow {
@@ -54,6 +60,8 @@ export interface TaskView {
   createdAt: string;
   active: boolean;
   latestRun: RunView | null;
+  /** What the task waits for (waiting_decision): the agent's questions and denied tool calls. */
+  pending: PendingView;
 }
 
 const IdParams = z.object({ id: z.string().min(1) });
@@ -65,15 +73,26 @@ const CreateTaskBody = z.object({
   expectedFiles: z.array(z.string().trim().min(1)).max(100).default([]),
   dependsOn: z.string().min(1).nullish(),
 });
+const AnswerBody = z.object({
+  answers: z.record(z.string(), z.string().max(4000)).default({}),
+  delegate: z.boolean().default(false),
+  note: z.string().max(4000).optional(),
+});
+const PermissionParams = z.object({ id: z.string().min(1), permissionId: z.string().min(1) });
+const PermissionBody = z.object({
+  action: z.enum(['once', 'task', 'always', 'denied'], {
+    error: 'action şunlardan biri olmalı: once, task, always, denied',
+  }),
+});
 const CleanupBody = z.object({ deleteBranch: z.boolean().default(false) }).default({
   deleteBranch: false,
 });
 
 export function registerProjectRoutes(
   app: FastifyInstance,
-  deps: { db: Db; runner: Runner; tasks: TaskService },
+  deps: { db: Db; runner: Runner; tasks: TaskService; decisions: DecisionService },
 ): void {
-  const { db, runner, tasks } = deps;
+  const { db, runner, tasks, decisions } = deps;
 
   const taskView = ({ task, prompt, projectId }: TaskWithContext): TaskView => {
     const run = latestRunSummary(db, task.id);
@@ -100,6 +119,10 @@ export function registerProjectRoutes(
       createdAt: task.createdAt,
       active: runner.isTaskRunning(task.id),
       latestRun: run ? { ...run, active: runner.isRunning(run.id) } : null,
+      pending:
+        task.status === 'waiting_decision'
+          ? pendingFor(db, task.id)
+          : { questions: [], permissions: [], round: 0 },
     };
   };
 
@@ -169,6 +192,24 @@ export function registerProjectRoutes(
   app.post('/api/tasks/:id/stop', async (request) => {
     const { id } = IdParams.parse(request.params);
     await tasks.stopTask(id);
+    return loadTask(id);
+  });
+
+  /** "Cevapla": answers the agent's questions; resumes the session when nothing else waits. */
+  app.post('/api/tasks/:id/answer', async (request) => {
+    const { id } = IdParams.parse(request.params);
+    const body = AnswerBody.parse(request.body ?? {});
+    const input: AnswerInput = { answers: body.answers, delegate: body.delegate };
+    if (body.note !== undefined) input.note = body.note;
+    await decisions.answer(id, input);
+    return loadTask(id);
+  });
+
+  /** The permission card: once / task ("İzin ver") / always ("Hep izin ver") / denied. */
+  app.post('/api/tasks/:id/permissions/:permissionId', async (request) => {
+    const { id, permissionId } = PermissionParams.parse(request.params);
+    const { action } = PermissionBody.parse(request.body);
+    await decisions.respondPermission(id, permissionId, action);
     return loadTask(id);
   });
 

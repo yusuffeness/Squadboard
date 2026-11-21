@@ -214,7 +214,10 @@ describe('plan → decisions → approval → parallel run', () => {
       'test',
     ]);
     expect(flag(plannerCall, '-p')).toContain('Giriş sayfası ve API ekle');
-    expect(flag(plannerCall, '-p')).toMatch(/kabuk \(terminal\) erişimi yok/);
+    // Only the Test agent has a shell, and only for the project's checks.
+    expect(flag(plannerCall, '-p')).toMatch(/yalnızca yanında "Kabuk" yazan ajanlar/);
+    expect(flag(plannerCall, '-p')).toMatch(/- test \(Test\): .*Kabuk: projenin test, lint/);
+    expect(flag(plannerCall, '-p')).not.toMatch(/- backend \(.*Kabuk:/);
 
     // Only steps that really happened, all finished.
     expect(view.steps.map((s) => s.id)).toEqual(['team', 'explore-1', 'validate', 'conflicts']);

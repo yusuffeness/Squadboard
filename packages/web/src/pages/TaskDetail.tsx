@@ -28,6 +28,7 @@ import { StatusPill } from '../ui/Pill';
 import { ProgressBar } from '../ui/ProgressBar';
 import { Segmented } from '../ui/Tabs';
 import { TONE } from '../ui/tones';
+import { WaitingTask } from './board/WaitingTask';
 
 type Tab = 'logs' | 'files' | 'summary';
 
@@ -56,6 +57,8 @@ export function TaskDetail({ task, tasks }: { task: TaskView; tasks: readonly Ta
             : `“${task.title}” · ${look.label}`}
         </p>
       </div>
+
+      {task.status === 'waiting_decision' && !task.active && <WaitingTask task={task} />}
 
       <div className="grid gap-6 lg:grid-cols-[22rem_minmax(0,1fr)]">
         <div className="flex flex-col gap-6">

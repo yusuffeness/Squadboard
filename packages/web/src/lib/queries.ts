@@ -9,9 +9,11 @@ import { createContext, useContext, useEffect } from 'react';
 import type { ProjectSettings } from '@squadboard/core';
 import type {
   AgentPatch,
+  AnswerInput,
   Api,
   InstallTeam,
   NewTask,
+  PermissionAction,
   PlanEdit,
   PlanView,
   TaskView,
@@ -190,6 +192,39 @@ export function useTaskActions(projectId: string) {
       mutationFn: ({ id, deleteBranch }: { id: string; deleteBranch: boolean }) =>
         api.cleanupTask(id, deleteBranch),
       ...after,
+    }),
+  };
+}
+
+/** "Kararın lazım" and the permission card: answers resume the agent once nothing else waits. */
+export function useDecisionActions(projectId: string) {
+  const api = useApi();
+  const client = useQueryClient();
+  const after = {
+    onSuccess: (task: TaskView) => putTask(client, task),
+    onSettled: () => refreshAfterTaskChange(client, projectId),
+  };
+  return {
+    answer: useMutation({
+      mutationFn: ({ id, input }: { id: string; input: AnswerInput }) => api.answerTask(id, input),
+      ...after,
+    }),
+    permission: useMutation({
+      mutationFn: ({
+        taskId,
+        permissionId,
+        action,
+      }: {
+        taskId: string;
+        permissionId: string;
+        action: PermissionAction;
+      }) => api.respondPermission(taskId, permissionId, action),
+      ...after,
+      onSettled: () => {
+        refreshAfterTaskChange(client, projectId);
+        // "Hep izin ver" changed .team/team.json.
+        void client.invalidateQueries({ queryKey: keys.team(projectId) });
+      },
     }),
   };
 }

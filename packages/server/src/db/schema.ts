@@ -168,13 +168,49 @@ export const decisions = sqliteTable(
     /** null for plan-level decisions asked by the Planner. */
     taskId: text('task_id').references(() => tasks.id, { onDelete: 'cascade' }),
     source: text('source').$type<'planner' | 'agent'>().notNull(),
+    /** The run that asked (agent questions). Questions of one run are one "round". */
+    runId: text('run_id'),
     question: text('question').notNull(),
+    /** Empty for a free-text question (and for an unreadable one). */
     options: text('options', { mode: 'json' }).$type<string[]>().notNull(),
+    multiSelect: integer('multi_select', { mode: 'boolean' }).notNull().default(false),
+    /**
+     * Set when the agent tried to ask but the question could not be read (broken KARAR block or
+     * AskUserQuestion input). `question` then holds what the agent wrote.
+     */
+    problem: text('problem'),
     choice: text('choice'),
     createdAt: createdAt(),
     answeredAt: text('answered_at'),
   },
   (t) => [index('decisions_request_idx').on(t.requestId)],
+);
+
+/**
+ * What the user decided about a denied tool call: `once` = only the next resume, `task` = every
+ * later run of this task, `always` = written to the project's `.team/team.json`, `denied`.
+ */
+export type PermissionStatus = 'pending' | 'once' | 'task' | 'always' | 'denied';
+
+/** A tool call the CLI denied (`result.permission_denials`), waiting for the user. */
+export const permissionRequests = sqliteTable(
+  'permission_requests',
+  {
+    id: text('id').primaryKey(),
+    taskId: text('task_id')
+      .notNull()
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    runId: text('run_id').notNull(),
+    tool: text('tool').notNull(),
+    /** The tool's full input, as denied. */
+    input: text('input', { mode: 'json' }).$type<Record<string, unknown>>().notNull(),
+    /** The rule that allows exactly this call (`Bash(npm test)`). */
+    rule: text('rule').notNull(),
+    status: text('status').$type<PermissionStatus>().notNull().default('pending'),
+    createdAt: createdAt(),
+    answeredAt: text('answered_at'),
+  },
+  (t) => [index('permission_requests_task_idx').on(t.taskId)],
 );
 
 export const reviews = sqliteTable('reviews', {

@@ -6,6 +6,8 @@ export * from './task-status.js';
 export * from './agent-event.js';
 export * from './claude-adapter.js';
 export * from './karar.js';
+export * from './agent-question.js';
+export * from './permission.js';
 export * from './plan.js';
 export * from './plan-review.js';
 export * from './team.js';

@@ -13,15 +13,17 @@ import type { Db } from './index.js';
 import {
   decisions,
   events,
+  permissionRequests,
   projects,
   requests,
   runs,
   tasks,
+  type PermissionStatus,
   type PlanStep,
   type RequestStatus,
 } from './schema.js';
 
-export type { PlanStep, RequestStatus };
+export type { PermissionStatus, PlanStep, RequestStatus };
 
 // Thin data-access helpers. Task status changes always go through the core state machine.
 
@@ -31,6 +33,7 @@ export type TaskRow = typeof tasks.$inferSelect;
 export type RunRow = typeof runs.$inferSelect;
 export type EventRow = typeof events.$inferSelect;
 export type DecisionRow = typeof decisions.$inferSelect;
+export type PermissionRequestRow = typeof permissionRequests.$inferSelect;
 
 const now = () => new Date().toISOString();
 
@@ -262,11 +265,22 @@ export function insertDecision(
     source: 'planner' | 'agent';
     question: string;
     options: string[];
+    runId?: string | null;
+    multiSelect?: boolean;
+    problem?: string | null;
   },
 ): DecisionRow {
   return db
     .insert(decisions)
-    .values({ id: randomUUID(), ...input, choice: null, answeredAt: null })
+    .values({
+      id: randomUUID(),
+      ...input,
+      runId: input.runId ?? null,
+      multiSelect: input.multiSelect ?? false,
+      problem: input.problem ?? null,
+      choice: null,
+      answeredAt: null,
+    })
     .returning()
     .get();
 }
@@ -285,8 +299,57 @@ export function listDecisions(db: Db, taskId: string): DecisionRow[] {
     .select()
     .from(decisions)
     .where(eq(decisions.taskId, taskId))
-    .orderBy(asc(decisions.createdAt))
+    .orderBy(asc(decisions.createdAt), asc(sql`decisions.rowid`))
     .all();
+}
+
+export function getDecision(db: Db, id: string): DecisionRow | undefined {
+  return db.select().from(decisions).where(eq(decisions.id, id)).get();
+}
+
+// ---------- permission requests ----------
+
+export function insertPermissionRequest(
+  db: Db,
+  input: {
+    taskId: string;
+    runId: string;
+    tool: string;
+    input: Record<string, unknown>;
+    rule: string;
+  },
+): PermissionRequestRow {
+  return db
+    .insert(permissionRequests)
+    .values({ id: randomUUID(), ...input, status: 'pending', answeredAt: null })
+    .returning()
+    .get();
+}
+
+export function getPermissionRequest(db: Db, id: string): PermissionRequestRow | undefined {
+  return db.select().from(permissionRequests).where(eq(permissionRequests.id, id)).get();
+}
+
+export function listPermissionRequests(db: Db, taskId: string): PermissionRequestRow[] {
+  return db
+    .select()
+    .from(permissionRequests)
+    .where(eq(permissionRequests.taskId, taskId))
+    .orderBy(asc(permissionRequests.createdAt), asc(sql`permission_requests.rowid`))
+    .all();
+}
+
+export function answerPermissionRequest(
+  db: Db,
+  id: string,
+  status: Exclude<PermissionStatus, 'pending'>,
+): PermissionRequestRow {
+  return db
+    .update(permissionRequests)
+    .set({ status, answeredAt: now() })
+    .where(eq(permissionRequests.id, id))
+    .returning()
+    .get();
 }
 
 /** What the API returns for a run: the run plus its prompt and task status. */

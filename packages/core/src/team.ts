@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ALLOW_RULE_RE } from './permission.js';
 import { ProjectSettings } from './schemas.js';
 
 /**
@@ -82,6 +83,31 @@ export const TeamFile = z
       .array(TeamAgent, { error: 'agents bir liste olmalı' })
       .min(1, 'Ekipte en az bir ajan olmalı'),
     settings: ProjectSettings,
+    /**
+     * Project-wide allow rules (`--allowedTools`), e.g. `Bash(npm test:*)`. Only matter for agents
+     * whose `tools` include the rule's tool. Missing = derived from the project's scripts.
+     */
+    permissions: z
+      .object(
+        {
+          allow: z.array(
+            z
+              .string({ error: 'permissions.allow içinde yazı olmalı' })
+              .trim()
+              .max(1000, 'Kural en fazla 1000 karakter olabilir')
+              .regex(
+                ALLOW_RULE_RE,
+                'Kural "Araç" ya da "Araç(…)" biçiminde olmalı (ör. "Bash(npm test:*)")',
+              )
+              .refine((rule) => rule !== 'Bash', {
+                error: 'Çıplak "Bash" her kabuk komutuna izin verir; "Bash(npm test:*)" gibi yaz',
+              }),
+            { error: 'permissions.allow bir liste olmalı' },
+          ),
+        },
+        { error: 'permissions alanı { "allow": [...] } olmalı' },
+      )
+      .optional(),
   })
   .superRefine((team, ctx) => {
     const ids = new Set<string>();

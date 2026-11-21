@@ -3,6 +3,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { existsSync } from 'node:fs';
 import { ZodError } from 'zod';
 import type { Db } from './db/index.js';
+import { DecisionService } from './decisions/decision-service.js';
 import { PlanService } from './plans/plan-service.js';
 import { Scheduler } from './plans/scheduler.js';
 import { registerPlanRoutes } from './routes/plans.js';
@@ -70,7 +71,12 @@ export function buildApp(options: AppOptions): FastifyInstance {
 
   app.get('/health', async (): Promise<HealthResponse> => ({ status: 'ok' }));
   registerRunRoutes(app, { db: options.db, runner: options.runner });
-  registerProjectRoutes(app, { db: options.db, runner: options.runner, tasks: options.tasks });
+  registerProjectRoutes(app, {
+    db: options.db,
+    runner: options.runner,
+    tasks: options.tasks,
+    decisions: new DecisionService(options.db, options.tasks),
+  });
   const scheduler = options.scheduler ?? new Scheduler(options.db, options.runner, options.tasks);
   const plans =
     options.plans ?? new PlanService(options.db, options.runner, options.tasks, scheduler);

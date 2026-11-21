@@ -1,4 +1,10 @@
-import { canTransition, patternsOverlap, type TaskStatus } from '@squadboard/core';
+import {
+  ASK_USER_QUESTION,
+  buildAllowedTools,
+  canTransition,
+  patternsOverlap,
+  type TaskStatus,
+} from '@squadboard/core';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -14,6 +20,7 @@ import {
   getTask,
   getTaskWithContext,
   listDependents,
+  listPermissionRequests,
   listProjectTasks,
   setTaskStatus,
   updateProject,
@@ -38,7 +45,7 @@ import { taskBranchName, worktreeFolderName } from '../git/naming.js';
 import type { AgentRunOptions } from '../runner/claude-cli.js';
 import type { RunHandle, RunOutcome, Runner } from '../runner/runner.js';
 import { ServiceError } from '../service-error.js';
-import { DEFAULT_TOOLS, TeamService } from '../team/team-service.js';
+import { DEFAULT_TOOLS, TeamService, type AgentRunConfig } from '../team/team-service.js';
 
 export { ServiceError };
 
@@ -54,12 +61,12 @@ export function defaultWorktreesDir(): string {
  *
  * `--allowedTools` alone is NOT a whitelist: other tools stay available, and Claude Code
  * auto-approves read-only shell commands such as `ls` (seen in the Stage 5 manual test).
- * `--tools` limits which tools exist at all; it also removes AskUserQuestion, which cannot
- * work headless (the agent asked anyway, got denied and guessed an answer).
+ * `--tools` limits which tools exist at all.
  */
 export const DEFAULT_AGENT_OPTIONS: AgentRunOptions = {
   permissionMode: 'acceptEdits',
-  tools: DEFAULT_TOOLS,
+  // AskUserQuestion is offered but never auto-approved: denied, it reaches the user as a question.
+  tools: [...DEFAULT_TOOLS, ASK_USER_QUESTION],
   allowedTools: DEFAULT_TOOLS,
   maxBudgetUsd: 1,
 };
@@ -264,7 +271,8 @@ export class TaskService {
     let task = ctx.task;
 
     if (this.runner.isTaskRunning(taskId)) throw new ServiceError(409, 'Task is already running');
-    const agentConfig = this.team.runConfig(project.path, task.agent);
+    const rules = this.grantedRules(taskId);
+    const agentConfig = this.team.runConfig(project.path, task.agent, rules);
     if (agentConfig.status === 'disabled') {
       throw new ServiceError(
         409,
@@ -286,11 +294,74 @@ export class TaskService {
     const cwd = task.worktreePath;
     if (!cwd || !this.isManagedWorktree(cwd)) throw new ServiceError(409, 'Task has no worktree');
 
-    const options = agentConfig.status === 'ok' ? agentConfig.options : this.agentOptions;
+    const options = this.optionsFor(agentConfig, rules);
     if (task.blockedReason) updateTask(this.db, taskId, { blockedReason: null });
     const handle = this.runner.start({ taskId, prompt: ctx.prompt, cwd, ...options });
-    this.hub.notify(project.id);
-    const done = handle.done.then((outcome) => this.afterRun(outcome, project.id));
+    return this.track(handle, project.id);
+  }
+
+  /**
+   * Continues a task that waits for the user (answers, permissions) in its own Claude session
+   * (`--resume`, from the worktree the session belongs to). `onceRules` are allowed for this run
+   * only ("Bir kez"); the task's lasting grants and the project's allowlist apply as always.
+   */
+  async resumeTask(
+    taskId: string,
+    prompt: string,
+    onceRules: readonly string[] = [],
+  ): Promise<RunHandle> {
+    const ctx = getTaskWithContext(this.db, taskId);
+    if (!ctx) throw new ServiceError(404, 'Task not found');
+    const project = getProject(this.db, ctx.projectId);
+    if (!project) throw new ServiceError(404, 'Project not found');
+    const task = ctx.task;
+    if (this.runner.isTaskRunning(taskId)) throw new ServiceError(409, 'Görev zaten çalışıyor');
+    if (task.status !== 'waiting_decision') {
+      throw new ServiceError(409, 'Bu görev senden cevap beklemiyor');
+    }
+    const rules = [...this.grantedRules(taskId), ...onceRules];
+    const agentConfig = this.team.runConfig(project.path, task.agent, rules);
+    if (agentConfig.status === 'disabled') {
+      throw new ServiceError(
+        409,
+        `${agentConfig.agent.names.tech} ekipte kapalı. Ekip sayfasından açıp tekrar dene.`,
+      );
+    }
+    // The session lives in the worktree folder; a cleaned-up worktree comes back at the same path.
+    if (!this.isManagedWorktree(task.worktreePath) || !existsSync(task.worktreePath)) {
+      await this.ensureWorktree(project, task, this.readyDependencies(task));
+    }
+    const options = this.optionsFor(agentConfig, rules);
+    let handle: RunHandle;
+    try {
+      handle = this.runner.resume({ taskId, prompt, ...options });
+    } catch (err) {
+      throw new ServiceError(409, `Görev sürdürülemedi: ${(err as Error).message}`);
+    }
+    return this.track(handle, project.id);
+  }
+
+  /** Rules the user granted for every run of this task ("İzin ver"). */
+  private grantedRules(taskId: string): string[] {
+    return listPermissionRequests(this.db, taskId)
+      .filter((p) => p.status === 'task')
+      .map((p) => p.rule);
+  }
+
+  /** The agent's options (rules already applied), or the default agent's with the rules. */
+  private optionsFor(config: AgentRunConfig, rules: readonly string[]): AgentRunOptions {
+    if (config.status === 'ok') return config.options;
+    const base = this.agentOptions;
+    return {
+      ...base,
+      allowedTools: buildAllowedTools(base.tools ?? [], [...(base.allowedTools ?? []), ...rules]),
+    };
+  }
+
+  /** Post-run bookkeeping for a started or resumed run. */
+  private track(handle: RunHandle, projectId: string): RunHandle {
+    this.hub.notify(projectId);
+    const done = handle.done.then((outcome) => this.afterRun(outcome, projectId));
     this.pending.add(done);
     void done.finally(() => this.pending.delete(done));
     return { ...handle, done };

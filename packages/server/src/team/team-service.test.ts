@@ -299,6 +299,69 @@ describe('agent settings reach the CLI', () => {
     expect(argv).not.toContain('Edit');
   });
 
+  it('gives writers AskUserQuestion and the Test agent a shell limited by the allowlist', () => {
+    const root = repo();
+    writeFileSync(
+      join(root, 'package.json'),
+      JSON.stringify({ scripts: { test: 'x', lint: 'y' } }),
+    );
+    writeFileSync(join(root, 'pnpm-lock.yaml'), '');
+    team.install(root, { templateId: 'fullstack-web' });
+
+    const backend = team.runConfig(root, 'backend');
+    expect(backend).toMatchObject({
+      status: 'ok',
+      options: {
+        tools: ['Read', 'Edit', 'Write', 'Glob', 'Grep', 'AskUserQuestion'],
+        // Shell rules are left out: the backend agent has no Bash at all.
+        allowedTools: ['Read', 'Edit', 'Write', 'Glob', 'Grep'],
+      },
+    });
+    const test = team.runConfig(root, 'test', ['Bash(make check)']);
+    expect(test).toMatchObject({
+      status: 'ok',
+      options: {
+        tools: ['Read', 'Edit', 'Write', 'Glob', 'Grep', 'Bash', 'AskUserQuestion'],
+        allowedTools: [
+          'Read',
+          'Edit',
+          'Write',
+          'Glob',
+          'Grep',
+          'Bash(pnpm test:*)',
+          'Bash(pnpm run test:*)',
+          'Bash(pnpm lint:*)',
+          'Bash(pnpm run lint:*)',
+          'Bash(make check)',
+        ],
+      },
+    });
+  });
+
+  it('derives the allowlist while team.json has none, and keeps it when a rule is added', () => {
+    const root = repo();
+    team.install(root, { templateId: 'minimal' });
+    // A team written before the allowlist existed: no "permissions" in the file.
+    const file = join(root, '.team/team.json');
+    const raw = JSON.parse(read(root, '.team/team.json')) as Record<string, unknown>;
+    delete raw.permissions;
+    writeFileSync(file, JSON.stringify(raw));
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ scripts: { typecheck: 'tsc' } }));
+
+    const state = team.read(root);
+    expect(state.status === 'ok' && state.team.permissions).toEqual({
+      allow: ['Bash(npm run typecheck:*)'],
+      fromFile: false,
+    });
+    const updated = team.addAllowRule(root, 'Bash(npm test)');
+    expect(updated.permissions).toEqual({
+      allow: ['Bash(npm run typecheck:*)', 'Bash(npm test)'],
+      fromFile: true,
+    });
+    // Adding the same rule twice keeps one.
+    expect(team.addAllowRule(root, 'Bash(npm test)').permissions.allow).toHaveLength(2);
+  });
+
   it('falls back to the default agent without a team or for an unknown agent', async () => {
     const root = repo();
     const { flag, argv } = await argsOfRun(root, 'backend', t?.dir ?? '');

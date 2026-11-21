@@ -10,7 +10,10 @@ export function plannerPrompt(request: string, workers: readonly AgentView[]): s
   const agents = workers
     .map((a) => {
       const owns = a.owns.length ? a.owns.join(', ') : 'belirtilmemiş';
-      return `- ${a.id} (${a.names.tech}): ${a.description}. Sahip olduğu yollar: ${owns}`;
+      const shell = a.tools?.includes('Bash')
+        ? ' Kabuk: projenin test, lint ve tip kontrolü komutlarını çalıştırabilir.'
+        : '';
+      return `- ${a.id} (${a.names.tech}): ${a.description}. Sahip olduğu yollar: ${owns}.${shell}`;
     })
     .join('\n');
   return `Kullanıcının isteği:
@@ -22,7 +25,7 @@ Bu isteği aşağıdaki ajanlar için görevlere böl. Yalnızca bu ajanlara gö
 ${agents}
 
 Kurallar:
-- Hiçbir ajanın kabuk (terminal) erişimi yok: komut, test, derleme ya da paket kurulumu çalıştıramazlar. "Testleri çalıştır", "npm install yap", "derle" gibi görev yazma. Test yazmak gerekiyorsa görev yalnızca test dosyalarını yazmak olsun.
+- Ajanlar kabukta (terminal) yalnızca projenin test, lint ve tip kontrolü komutlarını çalıştırabilir, o da yalnızca yanında "Kabuk" yazan ajanlar. Paket kurulumu, derleme ya da başka komutlar gerektiren görev yazma ("npm install yap", "derle" gibi). Testleri çalıştırma işini yalnızca kabuğu olan bir ajana ver; öyle bir ajan yoksa görev yalnızca test dosyalarını yazmak olsun.
 - "prompt": ajanın başka bir şey okumadan işi yapabileceği açık, Türkçe bir talimat. Kullanıcının kararlarına bağlı kısımları tahmin etme.
 - "expectedFiles": değişmesi beklenen dosyalar, repo köküne göre (glob olabilir). Görevi ajanın sahip olduğu yolların içinde tut.
 - "dependsOn": bu görevden önce bitmesi gereken görevlerin kimlikleri. Bağımsız görevler paralel çalışır; aynı dosyaya dokunan iki görevi bağımsız bırakma.
