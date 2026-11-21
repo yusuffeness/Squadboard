@@ -36,7 +36,7 @@ Ekip Panosu, geliştiricilerin kendi bilgisayarında çalıştırdığı açık 
 
 ## Ekran tasarımları
 
-İlk taslak [Ajan Ekibim – Tasarım Taslağı](https://claude.ai/artifact/Sb2sNmJ27NvBkTsPmPLKbx) kanvasında. Güncel referans ise [docs/design/](design/) içindeki 19 ekran görselidir (`v2-01-pano.jpg` … `v2-19-bilesenler.jpg`); arayüz bunlara birebir yakın yazılır. Aşama 6'da kabuk (v2-01, v2-18), bileşenler (v2-19) ve Pano (v2-01, v2-02, v2-04) yazıldı; Aşama 7'de Ekibini kur (v2-07) ve Ekip (v2-11) yazıldı; Aşama 8'de Planlayıcı düşünüyor (v2-05) ve Plan onayı (v2-06) yazıldı; karar, inceleme, geçmiş, harcama, ayarlar, onboarding ve hata ekranları kendi aşamalarında o görsellere göre gelecek. Görsellerdeki rakamlar (%62, $0,42, "~$0,30 tahmini", planlama adımlarının süreleri) örnektir: CLI ilerleme yüzdesi vermediği için çalışan işte ilerleme çubuğu belirsizdir, maliyet yalnızca run'ın gerçek `costUsd` alanından gelir. Plan onayında tahmin yerine ajanların bütçe sınırlarının toplamı "en fazla" diye gösterilir; v2-06'daki risk rozetleri (Düşük/Orta risk) Planlayıcı şemasında olmadığı için gösterilmez.
+İlk taslak [Ajan Ekibim – Tasarım Taslağı](https://claude.ai/artifact/Sb2sNmJ27NvBkTsPmPLKbx) kanvasında. Güncel referans ise [docs/design/](design/) içindeki 19 ekran görselidir (`v2-01-pano.jpg` … `v2-19-bilesenler.jpg`); arayüz bunlara birebir yakın yazılır. Aşama 6'da kabuk (v2-01, v2-18), bileşenler (v2-19) ve Pano (v2-01, v2-02, v2-04) yazıldı; Aşama 7'de Ekibini kur (v2-07) ve Ekip (v2-11) yazıldı; Aşama 8'de Planlayıcı düşünüyor (v2-05) ve Plan onayı (v2-06) yazıldı; Aşama 9'da Kararın lazım kutusu ve izin kartı (v2-03) yazıldı; inceleme, geçmiş, harcama, ayarlar, onboarding ve hata ekranları kendi aşamalarında o görsellere göre gelecek. Görsellerdeki rakamlar (%62, $0,42, "~$0,30 tahmini", planlama adımlarının süreleri) örnektir: CLI ilerleme yüzdesi vermediği için çalışan işte ilerleme çubuğu belirsizdir, maliyet yalnızca run'ın gerçek `costUsd` alanından gelir. Plan onayında tahmin yerine ajanların bütçe sınırlarının toplamı "en fazla" diye gösterilir; v2-06'daki risk rozetleri (Düşük/Orta risk) Planlayıcı şemasında olmadığı için gösterilmez. v2-03'teki seçenek kartlarının simgeleri gösterilmez: seçenekleri ajan yazar, anlamlı bir simge bilinmiyor.
 
 | # | Ekran | Amaç | Ana bileşenler | Veri kaynağı |
 | --- | --- | --- | --- | --- |
@@ -82,7 +82,7 @@ Tüm parçalar kullanıcının bilgisayarında çalışır. Dışarı çıkan te
 ```
 squadboard/
   packages/
-    core/      # tipler, Zod şemaları, durum makinesi, stream-json adaptörü, KARAR ve plan doğrulama
+    core/      # tipler, Zod şemaları, durum makinesi, stream-json adaptörü, ajan soruları (AskUserQuestion, KARAR), izin kuralları, plan doğrulama
                # test/fixtures/claude-cli: gerçek CLI kayıtları (adaptör testleri kullanır)
     server/    # Fastify, orkestratör, runner, git, SQLite
                # drizzle/: SQL migration'ları; test/fake-claude.mjs: kayıtları oynatan sahte CLI
@@ -90,11 +90,12 @@ squadboard/
                # src/git: git servisi (worktree, diff, commit, ana dal tespiti, Türkçe hatalar)
                # src/tasks: proje ve görev yaşam döngüsü; src/team: .team/ okuma, kurulum, ajan ayarları
                # src/plans: Planlayıcı, plan onayı, zamanlayıcı, açılışta toparlama; src/events: değişiklik sinyalleri
+               # src/decisions: ajanın soruları ve izin istekleri, cevaplar, tek --resume
     web/       # React arayüzü (Vite, Tailwind v4)
                # src/lib: API sorguları (TanStack Query), run başına tek SSE akışı, hash router
                #   (#token=…&p=…&task=…), Zustand (isim modu, seçili proje), pano kuralları (board.ts)
                # src/ui: v2-19 bileşenleri; src/shell: menü, üst çubuk, mobil sekme çubuğu
-               # src/pages: Pano, ajan detayı, plan ekranları (düşünüyor, onay), Ekip, "Yakında" sayfaları
+               # src/pages: Pano (Kararın lazım ve izin kartı dahil), ajan detayı, plan ekranları (düşünüyor, onay), Ekip, "Yakında" sayfaları
                # e2e: Playwright smoke testleri (API sayfada taklit edilir)
     spike/     # Aşama 1 keşif kodu, ürün kodu değil (silinebilir)
   templates/   # hazır ekip şablonları: <id>/.team/team.json + <id>/.claude/agents/*.md
@@ -169,17 +170,20 @@ claude -p "$GÖREV_METNİ" \
 **Karar alınması.** Başsız modda ajan sana söz ortasında soru soramaz. Aşama 1 ölçümü: "karar gerekiyorsa dur" talimatıyla ajan 10 denemenin hiçbirinde durmadı; ölçütler tek tek sayılınca 10/10 durdu ama cevaptan sonra yeni bir soru sordu (zincirleme soru). Bu yüzden:
 
 1. **Asıl yol: Planner sorar.** Planner planı üretirken kendi veremeyeceği kararları `openDecisions[]` olarak döndürür (bkz. Plan akışı). Sen bunları **plan onayında** cevaplarsın; cevaplar ilgili işlerin talimatına eklenir. Kararlar iş başlamadan, tek seferde alınır.
-2. **Yedek yol: KARAR bloğu.** Ajan çalışırken yine de beklenmedik bir seçimle karşılaşırsa durur ve son mesajına **tüm açık kararları tek blokta** yazar (`{"questions": [{question, options}]}`; tek soruluk biçim de kabul edilir). Runner bloğu yakalar, işi `waiting_decision` durumuna geçirir, arayüzde Kararın lazım kutusunu gösterir. Seçim gelince aynı oturum `--resume` ile "Karar: …" mesajıyla sürdürülür.
+2. **Yedek yol: ajan çalışırken sorar** (Aşama 9, ayrıntılar claude-cli-notes §17). Ajan beklenmedik bir seçimle karşılaşırsa Claude Code'un kendi `AskUserQuestion` aracını **bir kez, bütün açık sorularla** çağırır ve turu bitirir. Başsız modda araç reddedilir; çağrının tam girdisi (sorular, seçenek etiketleri, `multiSelect`) `result.permission_denials[]`'a düşer. Runner **son** çağrıyı okur (ajan reddi hata sanıp aynı soruları yeniden sorabiliyor), soruları `decisions` tablosuna `agent` kaynağıyla ve run kimliğiyle yazar, işi `waiting_decision` yapar. Aracı kullanmayan eski ya da elle yazılmış ajan dosyaları için KARAR bloğu (`{"questions": [{question, options}]}`, son mesajın sonunda) hâlâ okunur. Soru ya da blok bozuksa (kapanmamış blok, geçersiz JSON, sorusuz araç girdisi) iş sessizce bitmez: ajanın yazdığı metin "ajan bir şey sormak istemiş olabilir" uyarısıyla gösterilir, kullanıcı serbest metinle cevaplar. Bütün cevaplar gelince aynı oturum **tek bir** `--resume` mesajıyla sürdürülür. Ajan cevaptan sonra yine sorarsa kutu yeniden çıkar; bir görevde 2 turdan sonra arayüz "ajan üst üste soru soruyor" uyarısı verir.
 
-**İzin istekleri.** Başsız modda izin sorulamaz; beyaz liste dışındaki araç reddedilir. ⚠️ Red **işi durdurmaz**: ajan reddi araç sonucu olarak görür, başka yoldan devam eder ya da vazgeçer ve iş `success` ile biter. Reddedilen çağrılar yalnızca `result.permission_denials[]` içinde (araç adı ve tam girdi) listelenir. Bu yüzden runner her işin sonunda bu listeye bakar; boş değilse işi başarılı saymaz, "Şu komuta izin verelim mi?" kartını gösterir. Onay gelirse `--allowedTools` genişletilir ve oturum `--resume` ile "İzin verildi, tekrar dene" mesajıyla sürer. İzinleri MCP aracına yönlendiren bayrak v1'de kullanılmaz.
+**İzin istekleri.** Başsız modda izin sorulamaz; beyaz liste dışındaki araç reddedilir. ⚠️ Red **işi durdurmaz**: ajan reddi araç sonucu olarak görür, başka yoldan devam eder ya da vazgeçer ve iş `success` ile biter. Reddedilen çağrılar yalnızca `result.permission_denials[]` içinde (araç adı ve tam girdi) listelenir. Bu yüzden runner her işin sonunda bu listeye bakar; `AskUserQuestion` dışındaki redleri tekilleştirip `permission_requests` tablosuna yazar, işi `waiting_decision` yapar ve arayüz izin kartını gösterir (ne yapmak istiyor, hangi komut ya da dosya). Kart dört seçenek sunar: **İzin ver** (tam komut kuralı `Bash(<komut>)` bu görevin sonraki bütün çalıştırmalarına eklenir), **Bir kez** (yalnızca bir sonraki `--resume`'a), **Reddet** (ajana komutu çalıştırmadan devam etmesi söylenir), **Hep izin ver** (kural projenin `.team/team.json` dosyasındaki `permissions.allow` listesine yazılır). Bekleyen her şey cevaplanınca oturum tek bir `--resume` ile sürer. İzinleri MCP aracına yönlendiren bayrak v1'de kullanılmaz: süreç açık bekletilmez, bekleyen istekler veritabanında durur.
+
+**`--tools` ve `--allowedTools`.** `--tools` ajanın elindeki araç kümesidir ve gerçek sınırdır; içinde olmayan bir aracı `--allowedTools` eklemez (claude-cli-notes §17, B4). `--allowedTools` bu kümeden onay istemeden çalışacakları seçer: ajanın araçları (`Bash` ve `AskUserQuestion` hariç) + projenin allowlist'indeki, aracı `--tools`'ta olan kurallar + görevin izinleri. Çıplak `Bash` hiçbir zaman otomatik onaylanmaz; `Bash(npm test:*)` gibi önek kuralları bileşik komutla delinemez (`npm test && <başka>` için `<başka>` ayrıca sorulur). Bir ajanın kabuk izni isteyebilmesi için `tools` listesinde `Bash` olmalıdır; şablonlarda yalnızca Test ajanında vardır. Planlayıcı ve İnceleyici `Read, Glob, Grep` ile salt okunur kalır.
 
 **Runner** (`packages/server/src/runner/`, Aşama 3). Her `claude -p` süreci bir `runs` satırıdır. Runner süreci execa ile başlatır (`--session-id` önceden üretilir, ortam temizlenir), stdout'u satır satır core adaptöründen geçirir, her olayı önce veritabanına (`seq` sırasıyla) yazar sonra yayınlar. Süreç kapanınca sonucu belirler:
 
 | Durum | Run | İş |
 | --- | --- | --- |
 | `result` başarılı, KARAR yok, red yok | `succeeded` | `in_review` |
-| `result` başarılı + geçerli KARAR bloğu (sorular `decisions` tablosuna `agent` kaynağıyla yazılır) | `succeeded` | `waiting_decision` |
-| `result` başarılı + `permission_denials` boş değil | `succeeded` | `waiting_decision` |
+| `result` başarılı + ajan sordu (reddedilen `AskUserQuestion` ya da KARAR bloğu; sorular `decisions` tablosuna `agent` kaynağıyla yazılır) | `succeeded` | `waiting_decision` |
+| `result` başarılı + bozuk soru ya da KARAR bloğu (ajanın yazdığı `problem` işaretiyle saklanır) | `succeeded` | `waiting_decision` |
+| `result` başarılı + `AskUserQuestion` dışında red (`permission_requests` tablosuna) | `succeeded` | `waiting_decision` |
 | `result` hatalı (`error_max_turns` gibi) ya da `result` yok (stderr hatası, süreç başlamadı) | `failed` | `failed` |
 | `stop()` çağrıldı | `stopped` | `stopped` |
 
@@ -198,11 +202,13 @@ claude -p "$GÖREV_METNİ" \
 | `POST /api/projects/:id/team/install` | `{ templateId, agents?, settings?, overwrite? }`. Şablonu projeye yazar (aşağıda). İçeriği farklı dosya varsa ve `overwrite` yoksa hiçbir şey yazmadan 409 ve `conflicts: [...]`. |
 | `PATCH /api/projects/:id/team/settings` | Ekip ayarları (`concurrency`, `worktrees`, `requirePlanApproval`, `requireReview`). |
 | `PATCH /api/projects/:id/team/agents/:agentId` | `{ enabled?, names?, prompt?, model? }`. Aç/kapa ve isimler `team.json`'a, talimat ve model ajanın `.md` dosyasına yazılır. En az bir ajan açık kalmalı. |
-| `GET /api/projects/:id/tasks` | Görevler (oluşturulma sırasıyla): durum, ajan, dal, değişen ve beklenmeyen dosyalar, git hatası, başlatılamama nedeni (`blockedReason`), kesildi mi (`interrupted`), plan ve aşama, son run. |
+| `GET /api/projects/:id/tasks` | Görevler (oluşturulma sırasıyla): durum, ajan, dal, değişen ve beklenmeyen dosyalar, git hatası, başlatılamama nedeni (`blockedReason`), kesildi mi (`interrupted`), plan ve aşama, son run, bekleyenler (`pending`: cevapsız sorular, cevapsız izin istekleri, soru turu sayısı). |
 | `POST /api/projects/:id/tasks` | `{ title, prompt, agent?, expectedFiles?, dependsOn? }`. `dependsOn` bitmemiş bir görevse yeni görev `blocked` başlar. |
 | `GET /api/tasks/:id` | Tek görev. |
 | `POST /api/tasks/:id/start` | Worktree'yi (yoksa) açar ve görevi orada başlatır. Çalışıyorsa, bağımlılığı bitmediyse ya da durumu izin vermiyorsa 409. |
 | `POST /api/tasks/:id/stop` | Görevin çalışan sürecini (ağacıyla) durdurur. |
+| `POST /api/tasks/:id/answer` | `{ answers?: { kararId: cevap }, delegate?, note? }`. Ajanın sorularını cevaplar ("Cevapla"). Cevapsız soru kalırsa 400; `delegate` cevapsızları ajana bırakır ("Ajanın kararına bırak"). Bekleyen izin isteği yoksa oturumu hemen `--resume` ile sürdürür. Bekleyen bir şey yokken `note` ile "Devam ettir" de olur (önceki deneme başlatılamadıysa aynı cevaplar yeniden gider). Görev cevap beklemiyorsa 409. |
+| `POST /api/tasks/:id/permissions/:permissionId` | `{ action: "once" \| "task" \| "always" \| "denied" }`. İzin kartı. `always` kuralı `.team/team.json`'a yazar (ekip yoksa ya da dosya geçersizse 409). Zaten cevaplanmış istekte 409. Bekleyen soru yoksa oturumu sürdürür. |
 | `POST /api/tasks/:id/cleanup` | `{ deleteBranch? }`. Worktree'yi siler; dal varsayılan olarak kalır (dal silinirse görevin `-base` birleştirme dalı da gider). Çalışan görevde ya da dalı hâlâ başlangıç noktası olarak bekleyen bir görev varken dal silme isteğinde 409. |
 | `POST /api/projects/:id/plans` | `{ text }`. Ekibin Planlayıcısını başlatır, hemen `status: "planning"` ile döner. Ekip yoksa, Planlayıcı kapalıysa ya da iş alabilecek açık ajan yoksa 409 (Türkçe neden); projede zaten planlama sürüyorsa 409. |
 | `GET /api/projects/:id/plans` | Son 20 plan, yeniden eskiye: durum, gerçekten bildirilen adımlar, plan (aşamalar, çakışma notları, uyarılar, özet), onaydan sonra ilerleme. |
@@ -227,7 +233,7 @@ Ajan ayarları görevin ajanının tanımından gelir (`TeamService.runConfig`, 
 - Durdurma: Windows'ta `child.kill()` yalnızca `claude.exe`'yi öldürür, ajanın başlattığı bash ve node süreçleri yetim kalır. Süreç ağacı Windows'ta `taskkill /PID <pid> /T /F` ile, POSIX'te süreç grubu (`detached` + `process.kill(-pid)`) ile sonlandırılır. Öldürülen koşuda `result` olayı gelmez; runner bunu `stopped` sayar. Öldürülen oturum sonradan `--resume` ile sürdürülebilir.
 - Windows'ta npm'in `claude.cmd` dosyası yalnızca `bin/claude.exe`'ye yönlendirir; `.exe` doğrudan çalıştırılır (`shell: true` argüman tırnaklamasını bozar).
 - Sunucu bir Claude Code oturumunun içinden başlatılırsa `CLAUDECODE`, `CLAUDE_CODE_SESSION_ID` gibi oturum değişkenleri alt süreçlere geçer; runner bunları temizleyerek başlatır. Temizlik açık bir yasak listesiyle yapılır (`claude-cli.ts`), çünkü `CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_USE_BEDROCK`, `ANTHROPIC_API_KEY` gibi kullanıcı ayarları korunmalıdır.
-- POSIX'te süreç `detached` başlatıldığı için Squadboard kapanırsa ajan süreçleri kendiliğinden ölmez. Bu yüzden sunucu `SIGINT`, `SIGTERM`, `SIGHUP` (Windows'ta ayrıca `SIGBREAK`; Windows'ta Ctrl+C `SIGINT` olarak gelir) aldığında önce zamanlayıcıyı durdurur (yeni iş başlamaz, çalışan planlar `interrupted` olur), sonra `runner.stopAll()` ile Planlayıcı dahil tüm süreç ağaçlarını öldürür (run hatası "Squadboard kapandığı için iş yarıda kesildi"), run sonrası git işlerinin (commit, değişen dosyalar) bitmesini bekler (`tasks.drain()`), sonra HTTP sunucusunu ve veritabanını kapatır (`packages/server/src/shutdown.ts`). İkinci sinyal hemen çıkar. Sunucu zorla öldürülürse (`kill -9`, Görev Yöneticisi) bu çalışmaz; bu yüzden açılışta `recoverAfterRestart` hâlâ `running` görünen run ve görevleri aynı hatayla `stopped`, yarım planlamaları `failed`, çalışan planları `interrupted` yapar. Arayüz bunları "Kesildi" diye gösterir; hiçbir şey kendiliğinden yeniden başlamaz.
+- POSIX'te süreç `detached` başlatıldığı için Squadboard kapanırsa ajan süreçleri kendiliğinden ölmez. Bu yüzden sunucu `SIGINT`, `SIGTERM`, `SIGHUP` (Windows'ta ayrıca `SIGBREAK`; Windows'ta Ctrl+C `SIGINT` olarak gelir) aldığında önce zamanlayıcıyı durdurur (yeni iş başlamaz, çalışan planlar `interrupted` olur), sonra `runner.stopAll()` ile Planlayıcı dahil tüm süreç ağaçlarını öldürür (run hatası "Squadboard kapandığı için iş yarıda kesildi"), run sonrası git işlerinin (commit, değişen dosyalar) bitmesini bekler (`tasks.drain()`), sonra HTTP sunucusunu ve veritabanını kapatır (`packages/server/src/shutdown.ts`). İkinci sinyal hemen çıkar. Sunucu zorla öldürülürse (`kill -9`, Görev Yöneticisi) bu çalışmaz; bu yüzden açılışta `recoverAfterRestart` hâlâ `running` görünen run ve görevleri aynı hatayla `stopped`, yarım planlamaları `failed`, çalışan planları `interrupted` yapar. Arayüz bunları "Kesildi" diye gösterir; hiçbir şey kendiliğinden yeniden başlamaz. Karar ya da izin bekleyen görevlerin süreci yoktur; soruları ve izin istekleri veritabanında durduğu için kapanış ve açılış onlara dokunmaz, cevap yeniden başlatmadan sonra da aynı oturumu sürdürür. Cevaptan sonra sürdürülen run kapanışta kesilirse görev diğerleri gibi "Kesildi" olur.
 - `-p` modunda kullanıcının global ayarları, skill'leri ve hafızası yüklenir; ajan davranışı kullanıcıdan kullanıcıya değişebilir. `--strict-mcp-config` MCP sunucularını kapatır; `--setting-sources` ileride değerlendirilir (`--bare` abonelikle çalışmaz).
 
 **Git worktree stratejisi** (`packages/server/src/git/`, `packages/server/src/tasks/`, Aşama 5)
@@ -291,7 +297,8 @@ Sen bu projenin Arka Yüz ajanısın. Sunucu kodunu, API uç noktalarını ve i�
       "budgetUsd": 1
     }
   ],
-  "settings": { "concurrency": 3, "worktrees": true, "requirePlanApproval": true, "requireReview": true }
+  "settings": { "concurrency": 3, "worktrees": true, "requirePlanApproval": true, "requireReview": true },
+  "permissions": { "allow": ["Bash(npm test:*)", "Bash(npm run test:*)", "Bash(npm run lint:*)"] }
 }
 ```
 
@@ -300,7 +307,8 @@ Sen bu projenin Arka Yüz ajanısın. Sunucu kodunu, API uç noktalarını ve i�
 - `names`: iki isim modu (Teknik / Sade). Arayüzdeki isimler ve renkler buradan gelir; ekip kurulmamış projede web'deki sabit liste (`lib/agents.ts`) yedek olarak kullanılır. "Genel" ajanı şablon dışıdır: rolü olmayan eski görevler ve ekipte artık olmayan ajanlar için.
 - `owns`: ajanın dokunması beklenen yollar. Planlayıcı görevleri buna göre dağıtacak, çakışma tahmini de bundan beslenecek.
 - `enabled`: Ekip sayfasındaki anahtar. Kapalı ajan yeni görevlere önerilmez, görevi başlatılmaz. `budgetUsd`: run başına harcama sınırı (varsayılan 1).
-- `tools`: `--tools` ile gerçekten uygulanır (İnceleyici ve Planlayıcı `Read, Glob, Grep` ile salt okunurdur). Aynı liste `--allowedTools` ile otomatik onaylanır, `Bash` hariç: çıplak `Bash` her kabuk komutunu onaylardı. `tools` yazılmamışsa güvenli varsayılan (`Read, Edit, Write, Glob, Grep`) kullanılır.
+- `tools`: `--tools` ile gerçekten uygulanır (İnceleyici ve Planlayıcı `Read, Glob, Grep` ile salt okunurdur). Aynı liste `--allowedTools` ile otomatik onaylanır, `Bash` hariç: çıplak `Bash` her kabuk komutunu onaylardı. Dosya yazabilen ajanların `--tools` listesine Squadboard `AskUserQuestion`'ı ekler (onaylamaz; reddedilmesi gerekiyor ki soru bize ulaşsın). `tools` yazılmamışsa güvenli varsayılan (`Read, Edit, Write, Glob, Grep`) kullanılır. Şablonlarda yalnızca Test ajanının `Bash`'i vardır.
+- `permissions.allow` (Aşama 9): projenin allowlist'i, Claude Code'un `--allowedTools` kural biçiminde (`Araç` ya da `Araç(…)`; çıplak `Bash` reddedilir). Yalnızca `tools` listesinde o araç olan ajanlara etki eder. Dosyada yoksa projeden çıkarılır: `package.json`'daki `test`, `lint`, `typecheck` script'leri, kilit dosyasına göre `npm`/`pnpm`/`yarn`/`bun` önekiyle. Ekip kurulurken bu liste dosyaya yazılır; izin kartındaki "Hep izin ver" de buraya ekler (dosyada liste yoksa önce çıkarılan liste yazılır). Elle düzenlenebilir.
 
 **Ajan tanımı çalıştırmaya nasıl gider.** Sunucu tanımı her görev başlarken **kullanıcının kendi klasöründen** okur (worktree'den değil) ve `claude -p`'ye açıkça geçer: talimat `--append-system-prompt`, araçlar `--tools` / `--allowedTools`, `--model`, `--max-budget-usd`, `--permission-mode`. Böylece commit'lenmemiş bir düzenleme bir sonraki görevde geçerli olur. Claude Code'un `--agent` bayrağı kullanılmaz; nedeni claude-cli-notes §15'teki deneyde.
 
@@ -331,13 +339,13 @@ Doğrulama ve sıralama `packages/core` içindedir (`validatePlan`, `computeStag
 **Planlayıcıyı çalıştırma** (`packages/server/src/plans/plan-service.ts`, Aşama 8). "Planla" basılınca sunucu projenin `.team/` tanımından `planner` ajanını alır (yoksa ya da kapalıysa 409). Planlayıcı kullanıcının klasöründe, görev dışı tek seferlik bir `claude -p` ile çalışır (`Runner.runOnce`; `runs` tablosuna yazılmaz, kapanışta yine süreç ağacıyla öldürülür):
 
 - Araçlar ajanın listesinin salt okunur kısmı (`Read, Glob, Grep`), `--tools` ile gerçekten kısıtlı; talimat, model ve bütçe ajan dosyasından.
-- İstek metnine eklenenler: iş alabilecek ajanlar (açık, Planlayıcı olmayan ve dosya yazabilen; kimlik, ad, rol, `owns` yolları) ve kurallar. Şemadaki `agent` alanı bu kimliklerle `enum`'dur; kapalı ajan, Planlayıcı ve İnceleyici seçilemez. Hiçbir ajanın kabuk erişimi olmadığı açıkça yazılır: "testleri çalıştır" gibi görev istenmez (kabuk izni Aşama 9'da).
+- İstek metnine eklenenler: iş alabilecek ajanlar (açık, Planlayıcı olmayan ve dosya yazabilen; kimlik, ad, rol, `owns` yolları) ve kurallar. Şemadaki `agent` alanı bu kimliklerle `enum`'dur; kapalı ajan, Planlayıcı ve İnceleyici seçilemez. Kabuk kuralı da yazılır: yalnızca `tools`'unda `Bash` olan ajanlar (şablonda Test) projenin test, lint ve tip kontrolü komutlarını çalıştırabilir; bu ajanlar listede "Kabuk" diye işaretlenir, paket kurma ya da derleme gibi görevler istenmez.
 - Cevap şemaya ya da `validatePlan` kurallarına uymazsa (bilinmeyen ajan, döngü, `structured_output` yok) bir kez, sorun anlatılarak yeniden denenir; ikincisinde Türkçe hata, teknik ayrıntı `errorDetail`'de.
 - İlerleme yalnızca gerçekten olan adımlardır (`requests.steps`): "Ekip okundu", "Proje dosyaları inceleniyor" (her araç çağrısında bakış sayısı ve son dosya), "Plan şemaya uymadı, bir kez daha deneniyor", "Plan kontrol edildi", "Çakışma kontrolü". Süre adımın kendi başlangıç ve bitişinden; yüzde ya da kalan süre yok.
 
 **Aşamalar.** Sunucu, `dependsOn` bağlarından topolojik sıralama ile aşamaları hesaplar. Aynı aşamadaki işler eşzamanlılık sınırına kadar paralel başlar.
 
-**Zamanlayıcı** (`packages/server/src/plans/scheduler.ts`). Plan onaylanınca, kesilen plan sürdürülünce ve her run'ın commit işi bitince tetiklenir (zamanlayıcı yok, proje başına tek sıra). Çalışan plandaki, bağımlılıkları bitmiş `planned` işleri aşama ve plan sırasıyla başlatır; aynı anda çalışan iş sayısı ekibin `concurrency` ayarını geçmez (projedeki elle eklenmiş görevler de sayılır). Başarısız ya da durdurulan iş yeniden denenmez; ona bağlı işler `blocked` kalır. Başlatılamayan iş (birleştirme çatışması, kapalı ajan) `blocked` olur ve `blockedReason` ile işaretlenir, sıraya tekrar girmez. Bütün işleri `in_review`/`done` olan plan `done` olur.
+**Zamanlayıcı** (`packages/server/src/plans/scheduler.ts`). Plan onaylanınca, kesilen plan sürdürülünce ve her run'ın commit işi bitince tetiklenir (zamanlayıcı yok, proje başına tek sıra). Çalışan plandaki, bağımlılıkları bitmiş `planned` işleri aşama ve plan sırasıyla başlatır; aynı anda çalışan iş sayısı ekibin `concurrency` ayarını geçmez (projedeki elle eklenmiş görevler de sayılır). Başarısız ya da durdurulan iş yeniden denenmez; ona bağlı işler `blocked` kalır. Karar ya da izin bekleyen iş (`waiting_decision`) süreç tutmadığı için eşzamanlılık kotasını **doldurmaz**: o beklerken sıradaki iş başlar, ona bağlı işler ise `blocked` kalır. Cevap gelince bekleyen iş elle başlatma gibi hemen sürdürülür; bu kısa süre için çalışan iş sayısı sınırı bir aşabilir, zamanlayıcı yeni işi ancak sayı sınırın altına inince başlatır. Başlatılamayan iş (birleştirme çatışması, kapalı ajan) `blocked` olur ve `blockedReason` ile işaretlenir, sıraya tekrar girmez. Bütün işleri `in_review`/`done` olan plan `done` olur.
 
 **Çakışma önleme (3 katman)**
 
@@ -360,7 +368,8 @@ Tek bir SQLite dosyası, kullanıcının ana dizininde: `~/.squadboard/squadboar
 | `tasks` | id (tüm sistemde tekil; plandaki kısa kimlikler istek içinde tekil olduğundan onayda her işe yeni kimlik verilir), request, başlık, talimat (planlı işte; elle eklenende isteğin metni), ajan, bağımlılıklar, beklenen dosyalar, dal, worktree yolu, başlangıç dalı ve commit'i, değişen dosyalar, beklenmeyen dosyalar, git hatası, başlatılamama nedeni, durum, aşama |
 | `runs` | id, task, oturum kimliği, çalışma klasörü (resume için), devam ettirdiği run, pid, exit code, hata, başlangıç, bitiş, sonuç durumu, maliyet, tur sayısı |
 | `events` | id, run, sıra (`run` içinde tekil), tip, `AgentEvent` JSON'u, ham CLI satırı (o satırdan çıkan ilk olayda) |
-| `decisions` | id, request, task (Planner kararlarında boş), kaynak (`planner` / `agent`), soru, seçenekler, seçim, zaman |
+| `decisions` | id, request, task (Planner kararlarında boş), kaynak (`planner` / `agent`), soran run (bir run'ın soruları bir "tur"dur), soru, seçenekler (serbest metin sorusunda boş), çoklu seçim, sorun (soru okunamadıysa nedeni; soru alanında ajanın yazdığı), seçim, zaman |
+| `permission_requests` | id, task, run, araç, tam girdi, tam komut kuralı (`Bash(npm test)`), durum (`pending`, `once`, `task`, `always`, `denied`), zaman |
 | `reviews` | id, task, özet, risk, kontroller, dosyalar, karar (onay, geri gönder) |
 
 **İş durumları**
@@ -370,7 +379,7 @@ Tek bir SQLite dosyası, kullanıcının ana dizininde: `~/.squadboard/squadboar
 | `planned` | Planlandı | Plan onaylandı |
 | `blocked` | Planlandı | Bağımlı olduğu iş bitmedi |
 | `running` | Çalışıyor | Başladı |
-| `waiting_decision` | Çalışıyor (Kararın lazım) | Ajan KARAR bloğu yazdı (yedek yol) ya da izin reddedildi |
+| `waiting_decision` | Karar / İnceleme (üstte Kararın lazım kutusu) | Ajan sordu (`AskUserQuestion` ya da KARAR bloğu, bozuk olanı da), ya da bir araç çağrısı reddedildi. Süreç yoktur; cevaplar gelince aynı oturum sürdürülür |
 | `in_review` | İncelemede | İş bitti, Reviewer çalışıyor ya da sıra sende |
 | `changes_requested` | Çalışıyor | Sen geri gönderdin |
 | `done` | Bitti | Birleştirildi |
@@ -390,7 +399,7 @@ Uygulama bilgisayarında kod çalıştıran ajanları yönetiyor; bu yüzden var
   3. **Anahtar:** `/api` altındaki her istek anahtar ister, yoksa ya da yanlışsa 401. `Authorization: Bearer` ile gönderilir; `EventSource` başlık gönderemediği için yalnızca GET isteklerinde `?token=` de kabul edilir. Karşılaştırma sabit sürelidir; anahtar loglara yazılmaz.
 
   `squadboard` komutu adresi `http://127.0.0.1:4317/#token=…` olarak yazar ve tarayıcıyı açar. Anahtar URL'nin **fragment** kısmındadır: sunucuya, loglara ve Referer başlığına gitmez. Sayfa onu yalnızca bellekte tutar (localStorage'a yazmaz); adres çubuğunda kaldığı için sayfa yenilenince çalışmaya devam eder. Sayfanın kendisi (statik dosyalar) anahtarsız sunulur, içinde gizli bilgi yoktur.
-- **Ajan sınırları.** Her ajan yalnızca kendi worktree klasöründe ve kendi araç beyaz listesiyle çalışır. Her yetkiyi atlayan bayrak (`--dangerously-skip-permissions`) kullanılmaz.
+- **Ajan sınırları.** Her ajan yalnızca kendi worktree klasöründe ve kendi araç beyaz listesiyle çalışır. Her yetkiyi atlayan bayrak (`--dangerously-skip-permissions`) kullanılmaz. Kabuk yalnızca `tools`'unda `Bash` olan ajanda vardır ve yalnızca allowlist'teki komutlar sorulmadan çalışır. Dikkat: `npm test` projenin `package.json` script'ini çalıştırır ve ajan aynı worktree'de o dosyayı da düzenleyebilir; test komutu izni pratikte o worktree'de kod çalıştırma iznidir (Aşama 11'de gözden geçirilecek).
 - **Gizli dosyalar.** `.env` ve anahtar dosyalarının okunmasını yasaklayan izin kuralları **henüz yok**: Aşama 7 şablonları yalnızca araç kümesini sınırlıyor, `Read` aracı `.env`'i okuyabilir. Kurallar (ör. `--disallowedTools "Read(.env*)"`) Aşama 11'de eklenecek; söz dizimi hedef Claude Code sürümünde doğrulanmalıdır.
 - **Sınırlar.** `--max-budget-usd` (asıl sınır; `--max-turns` belgelenmemiş olduğu için yalnızca ek önlem), iş başına zaman aşımı ve eşzamanlılık üst sınırı (varsayılan 3). Durdurma basılınca süreç ağacının tamamı sonlandırılır (Windows'ta `taskkill /T /F`); yalnızca `claude` sürecini öldürmek ajanın başlattığı komutları yetim bırakır.
 - **Birleştirme.** Hiçbir dal sen onaylamadan birleşmez. Uzak depoya push v1'de yoktur. Zorla push hiç yoktur.
@@ -434,7 +443,7 @@ Numaralar "Aşama Planı ve Promptlar" belgesindeki aşamalarla aynıdır.
 | 6. Pano ve tasarım sistemi | Tasarım token'ları (v2 paleti, Nunito + JetBrains Mono, 44 px / 13 px), uygulama kabuğu (menü, proje hapı, isim modu, bugünkü maliyet, mobil sekme çubuğu), v2-19 temel bileşenleri, Pano (karşılama, ajan şeridi, 4 sütun, görev kartları, ajan detayı), boş ve hata durumları; TanStack Query + SSE + Zustand, 2 sn yoklama kaldırıldı | Pano gerçek API ile açılıyor ve canlı güncelleniyor; isim modu değişip kalıcı; 390 px'te yatay taşma yok; Playwright smoke testleri CI'da yeşil | ✅ (smoke testleri; elle deneme bekliyor) |
 | 7. Şablonlar ve Ekibini kur | `.team/team.json` şeması ve doğrulama, hazır şablonlar (`fullstack-web`, `minimal`) ve `.claude/agents/` dosyaları, ajan başına araç, model, bütçe ve izin, Ekibini kur (v2-07) ve Ekip (v2-11) ekranları; ana dalın her görevde yeniden tespiti, Türkçe git hataları, proje silme | Şablon kurulunca `.team/` ve `.claude/agents/` oluşuyor; isimler ve renkler şablondan geliyor; İnceleyici salt okunur; ajan ayarları çalıştırmaya yansıyor; elle düzenlenen `team.json` doğrulanıyor; `master` deposunda görev açılıyor | ✅ (testler; elle deneme bekliyor) |
 | 8. Planner ve scheduler | Planner (`--json-schema`, `openDecisions`, yalnızca açık ajanlar, salt okunur, bir yeniden deneme), Planlayıcı düşünüyor (v2-05) ve Plan onayı (v2-06) ekranları, bağımlılık, çakışma ve `owns` kontrolü, eşzamanlılık sınırıyla zamanlayıcı, çoklu bağımlılık için geçici taban dalı, `requirePlanApproval`, kapanışta ve açılışta "kesildi" | Tek istekten 4-5 iş sırayla ve paralel çalışıyor | ✅ (sahte CLI ile uçtan uca testler; elle deneme bekliyor) |
-| 9. Karar ve izin akışı | Plan kararlarının onayda cevaplanması, KARAR yedek akışı, izin kartı (`permission_denials` → izin → `--resume`), Karar ekranı (v2-03) | Plan kararları onayda cevaplanıyor; ajan durunca karar ya da izin kartı çıkıyor, cevaptan sonra aynı oturum sürüyor | |
+| 9. Karar ve izin akışı | Gerçek CLI ile değerlendirme (`AskUserQuestion` ana yol, KARAR yedek; izin redleri), Kararın lazım kutusu ve izin kartı (v2-03), tek `--resume` ile cevap, zincirleme soru uyarısı, bozuk soruyu gösterme, izin ver / bir kez / reddet / hep izin ver, proje allowlist'i (`team.json` → `permissions.allow`, test/lint/typecheck varsayılanı), Test ajanına kabuk | Plan kararları onayda cevaplanıyor; ajan durunca karar ya da izin kartı çıkıyor, cevaptan sonra aynı oturum sürüyor | ✅ (sahte CLI ile uçtan uca testler, gerçek CLI ile bir uçtan uca deneme; elle deneme bekliyor) |
 | 10. Reviewer ve merge | Reviewer şeması, İnceleme ekranı (v2-08), test komutu, Onayla ve birleştir (v2-09), Değişiklik iste | İnceleme akışı uçtan uca çalışıyor; onaylanan dal ana dala birleşiyor, worktree temizleniyor | |
 | 11. Dayanıklılık ve güvenlik | Sunucu yeniden başlayınca yarım kalan run ve görevlerin toparlanması, kredi ve limit bitimi (v2-16), Claude bulunamadı (v2-15) gibi hata durumları, güvenlik denetiminin gözden geçirilmesi, `.env` ve anahtar dosyalarını okumayı yasaklayan izin kuralları | Çökme ya da kapanış sonrası veri kaybolmuyor, yetim süreç kalmıyor; hata ekranları gerçek durumlarda çıkıyor | |
 | 12. Yayın | `npx` paketi, Windows/macOS/Linux denemesi, README (kurulum, kredi uyarısı), lisans, kısa demo videosu | Temiz bir bilgisayarda tek komutla kurulup ilk işin bittiği görülüyor | |
@@ -455,7 +464,7 @@ Aşama 1 en riskli adımdı ve raporun birkaç varsayımını değiştirdi (izin
 | Yerel sunucuya kötü amaçlı erişim, komut enjeksiyonu | Dosya zararı ya da sızıntı | Bölüm 10 önlemleri |
 | Kalabalık rakipler | Fark edilmemek | Odak: plan onayı, çakışma tahmini, sade inceleme, şablon ekosistemi |
 | Windows yol ve süreç farkları | Kurulum sorunları, yetim süreçler | CI'da Linux ve Windows job'ı; Windows'ta süreç ağacı `taskkill /T /F` ile sonlandırılır |
-| Ajanın gereksiz ya da zincirleme soru sorması | Kullanıcı sürekli bekliyor | Kararları Planner önceden topluyor; KARAR bloğu yedek ve tek seferde çok soru |
+| Ajanın gereksiz ya da zincirleme soru sorması | Kullanıcı sürekli bekliyor | Kararları Planner önceden topluyor; ajan `AskUserQuestion`'ı tek seferde bütün sorularla çağırıyor; 2 turdan sonra arayüz uyarıyor |
 
 **Açık sorular**
 
@@ -473,10 +482,10 @@ Aşama 1 en riskli adımdı ve raporun birkaç varsayımını değiştirdi (izin
 
 - **İlk sürüm yalnızca Claude Code.** Çoklu CLI desteği sonraya. Ajan başına model seçimi ajan dosyasındaki `model` alanıyla geldi (Aşama 7). Sürücü soyutlaması baştan hazır kalır, böylece sonra başka CLI eklemek kolay olur.
 - **Worktree'yi biz açıyoruz** (`git worktree add`): dal adı (`team/auth-api`) ve yığın dallar bizde kalır, kullanıcı temiz dal adları görür.
-- **İzinler kullanıcıyı yormasın:** `--permission-mode acceptEdits`, ajan başına araç kümesi `--tools` ile (asıl sınır) ve aynı liste `--allowedTools` ile otomatik onaylı; `Bash` hiçbir zaman otomatik onaylanmaz (Aşama 7). Ajan listede olmayan bir aracı isterse CLI onu reddeder ama işi durdurmaz; runner iş bitince `result.permission_denials[]`'a bakar, boş değilse arayüzde "Şu komuta izin verelim mi?" kartı çıkar; onaylanırsa liste genişler ve oturum `--resume` ile sürer. MCP izin bayrağı v1'de kullanılmıyor. (Aşama 1 bulgusuyla güncellendi.)
+- **İzinler kullanıcıyı yormasın:** `--permission-mode acceptEdits`, ajan başına araç kümesi `--tools` ile (asıl sınır) ve aynı liste `--allowedTools` ile otomatik onaylı; `Bash` hiçbir zaman otomatik onaylanmaz (Aşama 7). Ajan listede olmayan bir aracı isterse CLI onu reddeder ama işi durdurmaz; runner iş bitince `result.permission_denials[]`'a bakar, boş değilse arayüzde izin kartı çıkar (İzin ver, Bir kez, Reddet, Hep izin ver); onaylanırsa liste genişler ve oturum `--resume` ile sürer. Projenin test, lint ve tip kontrolü komutları baştan allowlist'te (`team.json` → `permissions.allow`). MCP izin bayrağı v1'de kullanılmıyor. (Aşama 1 ve 9 bulgularıyla güncellendi.)
 - **Lisans: MIT.** En düşük sürtünme, katkı vermek ve kullanmak en kolay olanı.
 - **Ürün adı: Squadboard.** npm'de "squadboard" boş. GitHub'da aynı adlı birkaç küçük depo var; biri (sabbour/squadboard) "Squad AI ajanları için yerel kanban panosu" diyor, 0 yıldızlı ama konsept benziyor. Alan adı ve marka kaydı bir kayıtçiden kontrol edilmeli.
-- **Kararları Planner soruyor** (Aşama 1 ölçümünden sonra). Planner, plan aşamasında açık kararları `openDecisions[]` olarak üretir, kullanıcı plan onayında cevaplar. KARAR bloğu yalnızca ajanın çalışırken karşılaştığı beklenmedik seçimler için yedektir ve tüm soruları tek seferde sorar (çok sorulu biçim).
+- **Kararları Planner soruyor** (Aşama 1 ölçümünden sonra). Planner, plan aşamasında açık kararları `openDecisions[]` olarak üretir, kullanıcı plan onayında cevaplar. Ajanın çalışırken karşılaştığı beklenmedik seçimler yedek yoldur: ajan `AskUserQuestion`'ı bir kez, bütün sorularla çağırır (Aşama 9'da KARAR bloğunun yerine ana yol oldu; KARAR bloğu eski ajan dosyaları için hâlâ okunur).
 - **Sonraya bırakıldı:** abonelik kredisi ve Anthropic'ten kural teyidi (Aşama 4 prototipinden sonra, gerçek veriyle).
 
 ## Kaynaklar
