@@ -68,6 +68,7 @@ function task(id: string, over: Partial<TaskView>): TaskView {
     createdAt: iso(60),
     active: false,
     latestRun: null,
+    pending: { questions: [], permissions: [], round: 0 },
     ...over,
   };
 }
@@ -103,6 +104,35 @@ export const TASKS: TaskView[] = [
     branch: 'team/siparis-tablosu-cd34',
     worktreePath: 'C:\\wt\\b',
     latestRun: run('r-table', 't-table', { taskStatus: 'waiting_decision', costUsd: 0.12 }),
+    // v2-03: two questions in one box and a permission request next to them.
+    pending: {
+      questions: [
+        {
+          id: 'q-db',
+          question: 'Hangi veritabanı kullanılsın?',
+          options: ['SQLite', 'PostgreSQL', 'JSON dosyası', 'Sen seç'],
+          multiSelect: false,
+          problem: null,
+        },
+        {
+          id: 'q-login',
+          question: 'Kullanıcı girişi gerekli mi?',
+          options: ['Evet, e-posta ile', 'Misafir yeterli', 'Sonra eklenir'],
+          multiSelect: false,
+          problem: null,
+        },
+      ],
+      permissions: [
+        {
+          id: 'perm-1',
+          tool: 'Bash',
+          command: 'pnpm add better-sqlite3',
+          path: null,
+          rule: 'Bash(pnpm add better-sqlite3)',
+        },
+      ],
+      round: 1,
+    },
   }),
   task('t-menu', {
     title: 'Menü kartları',
@@ -188,6 +218,7 @@ export const TEMPLATE: TemplateView = {
   name: 'Full-stack web uygulaması',
   description: 'Altı kişilik ekip.',
   settings: SETTINGS,
+  permissions: { allow: [], fromFile: false },
   files: ['.team/team.json'],
   agents: [
     agent('planner', 'Planlayıcı', 'Kaptan', '#9ED8E8', READ_ONLY),
@@ -204,6 +235,7 @@ export const MINIMAL: TemplateView = {
   name: 'Küçük ekip',
   description: 'Üç kişilik ekip.',
   settings: SETTINGS,
+  permissions: { allow: [], fromFile: false },
   files: ['.team/team.json'],
   agents: [
     agent('planner', 'Planlayıcı', 'Kaptan', '#9ED8E8', READ_ONLY),
@@ -220,6 +252,7 @@ export function teamOf(template: TemplateView, over: Partial<TeamView> = {}): Te
     description: template.description,
     settings: template.settings,
     agents: template.agents,
+    permissions: { allow: ['Bash(npm test:*)', 'Bash(npm run lint:*)'], fromFile: true },
   };
   return { status: 'ok', team: { ...structuredClone(team), ...over } };
 }
@@ -353,12 +386,15 @@ export interface MockLog {
   planEdits: unknown[];
   approvals: unknown[];
   newTasks: unknown[];
+  answers: { taskId: string; body: unknown }[];
+  permissions: { taskId: string; permissionId: string; body: unknown }[];
 }
 
 /** Answers every API call in the page. Unknown calls fail loudly so tests notice. */
 export async function mockApi(page: Page, opts: MockOptions = {}): Promise<MockLog> {
   let projects = opts.projects ?? [PROJECT];
-  const tasks = opts.tasks ?? TASKS;
+  // A copy: answering a question changes the task, and tests must not see each other's changes.
+  const tasks = structuredClone(opts.tasks ?? TASKS);
   let team: TeamState = opts.team ?? teamOf(TEMPLATE);
   let plans = opts.plans ?? [];
   const log: MockLog = {
@@ -370,6 +406,17 @@ export async function mockApi(page: Page, opts: MockOptions = {}): Promise<MockL
     planEdits: [],
     approvals: [],
     newTasks: [],
+    answers: [],
+    permissions: [],
+  };
+  /** The server resumes the agent once nothing is pending; the mock does the same. */
+  const settle = (task: TaskView): TaskView => {
+    const { questions, permissions } = task.pending;
+    if (questions.length > 0 || permissions.length > 0) return task;
+    task.status = 'running';
+    task.active = true;
+    task.pending = { questions: [], permissions: [], round: 0 };
+    return task;
   };
   const putPlan = (plan: PlanView) => {
     plans = [plan, ...plans.filter((p) => p.id !== plan.id)];
@@ -507,6 +554,25 @@ export async function mockApi(page: Page, opts: MockOptions = {}): Promise<MockL
       if (action === 'resume')
         return route.fulfill({ json: putPlan({ ...plan, status: 'running' }) });
       return route.fulfill({ json: plan });
+    }
+    const answer = /^\/api\/tasks\/([^/]+)\/answer$/.exec(path);
+    if (answer && method === 'POST') {
+      const target = tasks.find((t) => t.id === answer[1]);
+      if (!target) return route.fulfill({ status: 404, json: { error: 'Görev bulunamadı' } });
+      log.answers.push({ taskId: target.id, body: body() });
+      target.pending = { ...target.pending, questions: [] };
+      return route.fulfill({ json: settle(target) });
+    }
+    const permission = /^\/api\/tasks\/([^/]+)\/permissions\/([^/]+)$/.exec(path);
+    if (permission && method === 'POST') {
+      const target = tasks.find((t) => t.id === permission[1]);
+      if (!target) return route.fulfill({ status: 404, json: { error: 'Görev bulunamadı' } });
+      log.permissions.push({ taskId: target.id, permissionId: permission[2] ?? '', body: body() });
+      target.pending = {
+        ...target.pending,
+        permissions: target.pending.permissions.filter((p) => p.id !== permission[2]),
+      };
+      return route.fulfill({ json: settle(target) });
     }
     if (path === '/api/runs') return route.fulfill({ json: { runs: RUNS } });
     if (/^\/api\/runs\/[^/]+\/events$/.test(path)) {
