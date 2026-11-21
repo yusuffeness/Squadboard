@@ -36,7 +36,7 @@ Ekip Panosu, geliştiricilerin kendi bilgisayarında çalıştırdığı açık 
 
 ## Ekran tasarımları
 
-İlk taslak [Ajan Ekibim – Tasarım Taslağı](https://claude.ai/artifact/Sb2sNmJ27NvBkTsPmPLKbx) kanvasında. Güncel referans ise [docs/design/](design/) içindeki 19 ekran görselidir (`v2-01-pano.jpg` … `v2-19-bilesenler.jpg`); arayüz bunlara birebir yakın yazılır. Aşama 6'da kabuk (v2-01, v2-18), bileşenler (v2-19) ve Pano (v2-01, v2-02, v2-04) yazıldı; Aşama 7'de Ekibini kur (v2-07) ve Ekip (v2-11) yazıldı; karar, plan onayı, inceleme, geçmiş, harcama, ayarlar, onboarding ve hata ekranları kendi aşamalarında o görsellere göre gelecek. Görsellerdeki rakamlar (%62, $0,42) örnektir: CLI ilerleme yüzdesi vermediği için çalışan işte ilerleme çubuğu belirsizdir, maliyet yalnızca run'ın gerçek `costUsd` alanından gelir.
+İlk taslak [Ajan Ekibim – Tasarım Taslağı](https://claude.ai/artifact/Sb2sNmJ27NvBkTsPmPLKbx) kanvasında. Güncel referans ise [docs/design/](design/) içindeki 19 ekran görselidir (`v2-01-pano.jpg` … `v2-19-bilesenler.jpg`); arayüz bunlara birebir yakın yazılır. Aşama 6'da kabuk (v2-01, v2-18), bileşenler (v2-19) ve Pano (v2-01, v2-02, v2-04) yazıldı; Aşama 7'de Ekibini kur (v2-07) ve Ekip (v2-11) yazıldı; Aşama 8'de Planlayıcı düşünüyor (v2-05) ve Plan onayı (v2-06) yazıldı; karar, inceleme, geçmiş, harcama, ayarlar, onboarding ve hata ekranları kendi aşamalarında o görsellere göre gelecek. Görsellerdeki rakamlar (%62, $0,42, "~$0,30 tahmini", planlama adımlarının süreleri) örnektir: CLI ilerleme yüzdesi vermediği için çalışan işte ilerleme çubuğu belirsizdir, maliyet yalnızca run'ın gerçek `costUsd` alanından gelir. Plan onayında tahmin yerine ajanların bütçe sınırlarının toplamı "en fazla" diye gösterilir; v2-06'daki risk rozetleri (Düşük/Orta risk) Planlayıcı şemasında olmadığı için gösterilmez.
 
 | # | Ekran | Amaç | Ana bileşenler | Veri kaynağı |
 | --- | --- | --- | --- | --- |
@@ -47,7 +47,7 @@ Ekip Panosu, geliştiricilerin kendi bilgisayarında çalıştırdığı açık 
 
 **Tasarım kararları**
 
-- İsim modu: Teknik (Planlayıcı, Ön Yüz, Arka Yüz, Veritabanı, Test, İnceleyici) varsayılan; Sade (Kaptan, Pixel, Motor, Kutu, Dedektif, Usta) isteğe bağlı. Üst çubuktaki anahtarla değişir, tercih tarayıcıda (`localStorage`) kalır. Şimdilik `packages/web/src/lib/agents.ts` içinde; ileride iki isim de şablon dosyasında durur.
+- İsim modu: Teknik (Planlayıcı, Ön Yüz, Arka Yüz, Veritabanı, Test, İnceleyici) varsayılan; Sade (Kaptan, Pixel, Motor, Kutu, Dedektif, Usta) isteğe bağlı. Üst çubuktaki anahtarla değişir, tercih tarayıcıda (`localStorage`) kalır. İki isim de projenin `.team/team.json` dosyasında durur; ekip kurulmamış projede `packages/web/src/lib/agents.ts` içindeki sabit liste yedek olarak kullanılır.
 - Renk: şeftali zemin `#FCF3EC` (gradyan ve bulanık renkli daireler), kart `#FFFCFA`, metin `#1F2430`, vurgu `#E8664A`, başarı `#2F9E6B`, uyarı `#B26A00`, koyu log paneli `#1D2130`. Ajan pastelleri: Planlayıcı `#9ED8E8`, Ön Yüz `#FFB38A`, Arka Yüz `#8FB3FF`, Veritabanı `#86D3AE`, Test `#C6A8F0`, İnceleyici `#F5D27A`. Hepsi `packages/web/src/index.css` `@theme` bloğunda token; bileşenlerde ham hex yazılmaz.
 - Yazı tipi: Nunito (arayüz), JetBrains Mono (dal, dosya ve çıktı).
 - Erişilebilirlik: dokunma hedefi en az 44 px, en küçük metin 13 px (`text-xs` buna göre tanımlı), metin kontrastı 4,5:1 ve üstü, durum yalnızca renkle değil metinle de gösterilir, anahtarlar `role="switch"`.
@@ -62,7 +62,7 @@ Tüm parçalar kullanıcının bilgisayarında çalışır. Dışarı çıkan te
 | --- | --- |
 | Web arayüzü (React) | Kabuk, Pano ve sonraki aşamalarda gelen ekranlar. Sunucuyla HTTP ile konuşur, canlı olayları SSE ile alır. |
 | Yerel sunucu (Fastify) | API, olay akışı, statik arayüz dosyaları. Yalnızca `127.0.0.1`'e bağlanır. |
-| Orkestratör | Planı bağımlılık grafiğine çevirir, hazır işleri eşzamanlılık sınırına göre başlatır, karar bekleyenleri durdurur. |
+| Planlama ve zamanlayıcı | `PlanService` Planlayıcıyı çalıştırır, planı doğrular ve onaydan sonra görevlere çevirir; `Scheduler` bağımlılıkları biten işleri ekibin eşzamanlılık sınırına göre başlatır (`packages/server/src/plans/`). |
 | Runner | `claude -p` sürecini başlatır, `stream-json` satırlarını okuyup olaylara çevirir, durdurma ve devam ettirmeyi yönetir. |
 | Git servisi | Worktree oluşturma, diff, dal birleştirme, temizlik. |
 | Şablon yükleyici | `.team/` klasörünü okur ve doğrular. |
@@ -89,11 +89,12 @@ squadboard/
                # bin/squadboard.js → src/cli.ts: `squadboard` komutu; src/dev.ts: `pnpm dev` girişi
                # src/git: git servisi (worktree, diff, commit, ana dal tespiti, Türkçe hatalar)
                # src/tasks: proje ve görev yaşam döngüsü; src/team: .team/ okuma, kurulum, ajan ayarları
+               # src/plans: Planlayıcı, plan onayı, zamanlayıcı, açılışta toparlama; src/events: değişiklik sinyalleri
     web/       # React arayüzü (Vite, Tailwind v4)
                # src/lib: API sorguları (TanStack Query), run başına tek SSE akışı, hash router
                #   (#token=…&p=…&task=…), Zustand (isim modu, seçili proje), pano kuralları (board.ts)
                # src/ui: v2-19 bileşenleri; src/shell: menü, üst çubuk, mobil sekme çubuğu
-               # src/pages: Pano, ajan detayı, Ekip (Ekibini kur, üyeler), "Yakında" sayfaları
+               # src/pages: Pano, ajan detayı, plan ekranları (düşünüyor, onay), Ekip, "Yakında" sayfaları
                # e2e: Playwright smoke testleri (API sayfada taklit edilir)
     spike/     # Aşama 1 keşif kodu, ürün kodu değil (silinebilir)
   templates/   # hazır ekip şablonları: <id>/.team/team.json + <id>/.claude/agents/*.md
@@ -197,12 +198,20 @@ claude -p "$GÖREV_METNİ" \
 | `POST /api/projects/:id/team/install` | `{ templateId, agents?, settings?, overwrite? }`. Şablonu projeye yazar (aşağıda). İçeriği farklı dosya varsa ve `overwrite` yoksa hiçbir şey yazmadan 409 ve `conflicts: [...]`. |
 | `PATCH /api/projects/:id/team/settings` | Ekip ayarları (`concurrency`, `worktrees`, `requirePlanApproval`, `requireReview`). |
 | `PATCH /api/projects/:id/team/agents/:agentId` | `{ enabled?, names?, prompt?, model? }`. Aç/kapa ve isimler `team.json`'a, talimat ve model ajanın `.md` dosyasına yazılır. En az bir ajan açık kalmalı. |
-| `GET /api/projects/:id/tasks` | Görevler (oluşturulma sırasıyla): durum, ajan, dal, değişen ve beklenmeyen dosyalar, git hatası, son run. |
+| `GET /api/projects/:id/tasks` | Görevler (oluşturulma sırasıyla): durum, ajan, dal, değişen ve beklenmeyen dosyalar, git hatası, başlatılamama nedeni (`blockedReason`), kesildi mi (`interrupted`), plan ve aşama, son run. |
 | `POST /api/projects/:id/tasks` | `{ title, prompt, agent?, expectedFiles?, dependsOn? }`. `dependsOn` bitmemiş bir görevse yeni görev `blocked` başlar. |
 | `GET /api/tasks/:id` | Tek görev. |
 | `POST /api/tasks/:id/start` | Worktree'yi (yoksa) açar ve görevi orada başlatır. Çalışıyorsa, bağımlılığı bitmediyse ya da durumu izin vermiyorsa 409. |
 | `POST /api/tasks/:id/stop` | Görevin çalışan sürecini (ağacıyla) durdurur. |
-| `POST /api/tasks/:id/cleanup` | `{ deleteBranch? }`. Worktree'yi siler; dal varsayılan olarak kalır. Çalışan görevde ya da dalı hâlâ başlangıç noktası olarak bekleyen bir görev varken dal silme isteğinde 409. |
+| `POST /api/tasks/:id/cleanup` | `{ deleteBranch? }`. Worktree'yi siler; dal varsayılan olarak kalır (dal silinirse görevin `-base` birleştirme dalı da gider). Çalışan görevde ya da dalı hâlâ başlangıç noktası olarak bekleyen bir görev varken dal silme isteğinde 409. |
+| `POST /api/projects/:id/plans` | `{ text }`. Ekibin Planlayıcısını başlatır, hemen `status: "planning"` ile döner. Ekip yoksa, Planlayıcı kapalıysa ya da iş alabilecek açık ajan yoksa 409 (Türkçe neden); projede zaten planlama sürüyorsa 409. |
+| `GET /api/projects/:id/plans` | Son 20 plan, yeniden eskiye: durum, gerçekten bildirilen adımlar, plan (aşamalar, çakışma notları, uyarılar, özet), onaydan sonra ilerleme. |
+| `GET /api/plans/:id` | Tek plan. |
+| `PATCH /api/plans/:id` | `{ removeTask }` ya da `{ taskId, agent }`. Yalnızca onay bekleyen planda; ajan açık ve dosya yazabilen biri olmalı (400). Aşamalar ve çakışmalar yeniden hesaplanır. |
+| `POST /api/plans/:id/approve` | `{ answers: { kararId: cevap } }`. Cevapsız karar varsa 400, kapalı ajana iş varsa 409. Görevleri oluşturur, zamanlayıcıya verir. |
+| `POST /api/plans/:id/cancel` | Çalışan Planlayıcıyı (süreç ağacıyla) durdurur ya da onay bekleyen planı bırakır. |
+| `POST /api/plans/:id/resume` | Kesilen planı (`interrupted`) yeniden zamanlayıcıya verir ("Devam et"). |
+| `GET /api/projects/:id/events` | SSE. Projede bir şey değişince (görev oluştu, başladı, bitti; plan adımı; onay) veri taşımayan `event: change`. Arayüz görevleri ve planları normal API'den yeniden okur; yoklama yok. Bağlanınca bir `change` gelir. |
 | `GET /api/runs` | Son 50 run: istek metni, klasör, durum, iş durumu, maliyet, tur, süre, `active`. |
 | `GET /api/runs/:id` | Tek run özeti. |
 | `POST /api/runs/:id/stop` | Süreç ağacını öldürür, güncel özeti döner (bitmiş run'da etkisizdir). |
@@ -218,7 +227,7 @@ Ajan ayarları görevin ajanının tanımından gelir (`TeamService.runConfig`, 
 - Durdurma: Windows'ta `child.kill()` yalnızca `claude.exe`'yi öldürür, ajanın başlattığı bash ve node süreçleri yetim kalır. Süreç ağacı Windows'ta `taskkill /PID <pid> /T /F` ile, POSIX'te süreç grubu (`detached` + `process.kill(-pid)`) ile sonlandırılır. Öldürülen koşuda `result` olayı gelmez; runner bunu `stopped` sayar. Öldürülen oturum sonradan `--resume` ile sürdürülebilir.
 - Windows'ta npm'in `claude.cmd` dosyası yalnızca `bin/claude.exe`'ye yönlendirir; `.exe` doğrudan çalıştırılır (`shell: true` argüman tırnaklamasını bozar).
 - Sunucu bir Claude Code oturumunun içinden başlatılırsa `CLAUDECODE`, `CLAUDE_CODE_SESSION_ID` gibi oturum değişkenleri alt süreçlere geçer; runner bunları temizleyerek başlatır. Temizlik açık bir yasak listesiyle yapılır (`claude-cli.ts`), çünkü `CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_USE_BEDROCK`, `ANTHROPIC_API_KEY` gibi kullanıcı ayarları korunmalıdır.
-- POSIX'te süreç `detached` başlatıldığı için Squadboard kapanırsa ajan süreçleri kendiliğinden ölmez. Bu yüzden sunucu `SIGINT`, `SIGTERM`, `SIGHUP` (Windows'ta ayrıca `SIGBREAK`; Windows'ta Ctrl+C `SIGINT` olarak gelir) aldığında önce `runner.stopAll()` ile tüm süreç ağaçlarını öldürür, run sonrası git işlerinin (commit, değişen dosyalar) bitmesini bekler (`tasks.drain()`), sonra HTTP sunucusunu ve veritabanını kapatır (`packages/server/src/shutdown.ts`). İkinci sinyal hemen çıkar. Sunucu zorla öldürülürse (`kill -9`, Görev Yöneticisi) bu çalışmaz; açılışta yetim run'ları `stopped` yapmak sonraki bir aşamanın işi.
+- POSIX'te süreç `detached` başlatıldığı için Squadboard kapanırsa ajan süreçleri kendiliğinden ölmez. Bu yüzden sunucu `SIGINT`, `SIGTERM`, `SIGHUP` (Windows'ta ayrıca `SIGBREAK`; Windows'ta Ctrl+C `SIGINT` olarak gelir) aldığında önce zamanlayıcıyı durdurur (yeni iş başlamaz, çalışan planlar `interrupted` olur), sonra `runner.stopAll()` ile Planlayıcı dahil tüm süreç ağaçlarını öldürür (run hatası "Squadboard kapandığı için iş yarıda kesildi"), run sonrası git işlerinin (commit, değişen dosyalar) bitmesini bekler (`tasks.drain()`), sonra HTTP sunucusunu ve veritabanını kapatır (`packages/server/src/shutdown.ts`). İkinci sinyal hemen çıkar. Sunucu zorla öldürülürse (`kill -9`, Görev Yöneticisi) bu çalışmaz; bu yüzden açılışta `recoverAfterRestart` hâlâ `running` görünen run ve görevleri aynı hatayla `stopped`, yarım planlamaları `failed`, çalışan planları `interrupted` yapar. Arayüz bunları "Kesildi" diye gösterir; hiçbir şey kendiliğinden yeniden başlamaz.
 - `-p` modunda kullanıcının global ayarları, skill'leri ve hafızası yüklenir; ajan davranışı kullanıcıdan kullanıcıya değişebilir. `--strict-mcp-config` MCP sunucularını kapatır; `--setting-sources` ileride değerlendirilir (`--bare` abonelikle çalışmaz).
 
 **Git worktree stratejisi** (`packages/server/src/git/`, `packages/server/src/tasks/`, Aşama 5)
@@ -233,8 +242,8 @@ Claude Code'un kendi [`--worktree`/`-w` bayrağı](https://claudefa.st/blog/guid
 | Dal adı | `team/<başlık-slug>-<görev id'sinin ilk 4 karakteri>`, Türkçe karakterler ASCII'ye çevrilir (`Giriş API` → `team/giris-api-9f3c`). |
 | Ne zaman açılır | Görev ilk kez başlatılınca. Temizlendikten sonra yeniden başlatılırsa aynı yolda, var olan dal üzerinde yeniden açılır; böylece Claude oturumu (klasöre bağlı) da sürdürülebilir kalır. |
 | Ana dal | Kayıtlı dala güvenilmez, her görev oluşturulurken ve worktree açılırken yeniden tespit edilir (`detectMainBranch`): kayıtlı dal hâlâ varsa o, yoksa `origin/HEAD`, sonra çıkış yapılmış dal, sonra `main` / `master`; yalnızca commit'i olan dallar sayılır. Değiştiyse proje kaydı güncellenir. (Örnek: proje `main` diye kaydedilmiş ama repo `master` kullanıyor; eskiden görev açılamıyordu.) Hiç commit'li dal yoksa görev başlamaz, "Depoda henüz commit yok" denir. |
-| Başlangıç noktası | Bağımlılığı yoksa projenin ana dalı. Bağımlılığı varsa o görevin dalı (**yığın dal**). Başlangıç commit'i (`baseCommit`) kaydedilir; değişiklikler ona göre ölçülür. Şimdilik en fazla bir bağımlılık; birden çoğu iki dalı birleştirmeyi gerektirir (Aşama 8). |
-| Bağımlılık | Bağımlı görev, bağımlılığı `in_review` ya da `done` olana kadar `blocked` kalır; bağımlılık bitince otomatik `planned` olur. |
+| Başlangıç noktası | Bağımlılığı yoksa projenin ana dalı (her seferinde yeniden tespit edilir). Tek bağımlılığı varsa o görevin dalı (**yığın dal**). Birden çok bağımlılığı varsa `team/<görev-dalı>-base` adlı geçici bir taban dalı açılır: ilk bağımlılığın dalından başlar, diğerleri sırayla `merge --no-ff` ile birleştirilir; bu iş repo dışındaki geçici bir worktree'de (`<worktrees>/<proje>/_merge-…`) yapılır ve worktree hemen silinir. Görev bu tabandan başlar. Birleştirme çatışırsa merge geri alınır, taban dalı silinir, görev **başlatılmaz**: `blocked` olur ve `blockedReason` hangi işlerin hangi dosyalarda çatıştığını söyler. Kullanıcının ana dalına ve çalışma ağacına dokunulmaz. Başlangıç commit'i (`baseCommit`) kaydedilir; değişiklikler ona göre ölçülür (tabana birleşen önceki işler sayılmaz). |
+| Bağımlılık | Bağımlı görev, **bütün** bağımlılıkları `in_review` ya da `done` olana kadar `blocked` kalır; hepsi bitince otomatik `planned` olur. Bağımlılığı başarısız olan ya da durdurulan görev `blocked` kalır (kartta nedeni yazar). |
 | Ajanın işi | Run `in_review` ile bitince worktree'deki her şey görevin **kendi dalına** commit'lenir (`squadboard: <başlık>`), bağımlı görev bu commit'ten başlar. Repoda `user.email` yoksa "Squadboard &lt;squadboard@localhost&gt;" kimliği kullanılır. Durdurulan ya da beklemeye düşen işler commit'lenmez. |
 | Değişen dosyalar | Her run'dan sonra `git diff --name-only <baseCommit>` + izlenmeyen yeni dosyalar. `expectedFiles` doluysa bunlarla eşleşmeyenler `unexpectedFiles` olarak işaretlenir (arayüzde uyarı). Desen eşleme core'daki `patternsOverlap` ile. |
 | Temizlik | `git worktree remove --force` + `prune`. Dal varsayılan olarak kalır (commit'lenmiş iş onda). İstenirse dal da silinir; ama dalı başlangıç noktası olarak bekleyen bir görev varsa reddedilir. Çalışan görev temizlenemez. |
@@ -302,7 +311,7 @@ Sen bu projenin Arka Yüz ajanısın. Sunucu kodunu, API uç noktalarını ve i�
 
 ## Plan akışı, bağımlılık ve çakışma yönetimi
 
-Planlayıcı çıktısı kesin bir JSON şemasına bağlıdır (`--json-schema` ile zorlanır; sonuç `result.structured_output` alanından okunur ve Zod ile bir kez daha doğrulanır). Her iş şunları taşır: `id`, `title`, `agent`, `dependsOn[]`, `expectedFiles[]`. Planlayıcının kendi başına veremediği kararlar `openDecisions[]` içinde gelir: `id`, `question`, `options` (2–4), `taskIds` (boşsa tüm planı etkiler).
+Planlayıcı çıktısı kesin bir JSON şemasına bağlıdır (`--json-schema` ile zorlanır, `planJsonSchema` core'da; sonuç `result.structured_output` alanından okunur ve Zod ile bir kez daha doğrulanır). Her iş şunları taşır: `id`, `title`, `agent`, `dependsOn[]`, `expectedFiles[]`, `prompt` (ajana verilecek açık talimat). Planlayıcının kendi başına veremediği kararlar `openDecisions[]` içinde gelir: `id`, `question`, `options` (2–4), `taskIds` (boşsa tüm planı etkiler).
 
 ```json
 {
@@ -317,17 +326,26 @@ Planlayıcı çıktısı kesin bir JSON şemasına bağlıdır (`--json-schema` 
 }
 ```
 
-Doğrulama ve sıralama `packages/core` içindedir (`validatePlan`, `computeStages`, `schedulePlan`): tekrarlanan ya da bilinmeyen iş kimlikleri, bilinmeyen ajanlar ve bağımlılık döngüleri (döngünün yoluyla birlikte) hata olarak raporlanır.
+Doğrulama ve sıralama `packages/core` içindedir (`validatePlan`, `computeStages`, `schedulePlan`; onay ekranı yardımcıları `plan-review.ts`): tekrarlanan ya da bilinmeyen iş kimlikleri, bilinmeyen ajanlar ve bağımlılık döngüleri (döngünün yoluyla birlikte) hata olarak raporlanır.
+
+**Planlayıcıyı çalıştırma** (`packages/server/src/plans/plan-service.ts`, Aşama 8). "Planla" basılınca sunucu projenin `.team/` tanımından `planner` ajanını alır (yoksa ya da kapalıysa 409). Planlayıcı kullanıcının klasöründe, görev dışı tek seferlik bir `claude -p` ile çalışır (`Runner.runOnce`; `runs` tablosuna yazılmaz, kapanışta yine süreç ağacıyla öldürülür):
+
+- Araçlar ajanın listesinin salt okunur kısmı (`Read, Glob, Grep`), `--tools` ile gerçekten kısıtlı; talimat, model ve bütçe ajan dosyasından.
+- İstek metnine eklenenler: iş alabilecek ajanlar (açık, Planlayıcı olmayan ve dosya yazabilen; kimlik, ad, rol, `owns` yolları) ve kurallar. Şemadaki `agent` alanı bu kimliklerle `enum`'dur; kapalı ajan, Planlayıcı ve İnceleyici seçilemez. Hiçbir ajanın kabuk erişimi olmadığı açıkça yazılır: "testleri çalıştır" gibi görev istenmez (kabuk izni Aşama 9'da).
+- Cevap şemaya ya da `validatePlan` kurallarına uymazsa (bilinmeyen ajan, döngü, `structured_output` yok) bir kez, sorun anlatılarak yeniden denenir; ikincisinde Türkçe hata, teknik ayrıntı `errorDetail`'de.
+- İlerleme yalnızca gerçekten olan adımlardır (`requests.steps`): "Ekip okundu", "Proje dosyaları inceleniyor" (her araç çağrısında bakış sayısı ve son dosya), "Plan şemaya uymadı, bir kez daha deneniyor", "Plan kontrol edildi", "Çakışma kontrolü". Süre adımın kendi başlangıç ve bitişinden; yüzde ya da kalan süre yok.
 
 **Aşamalar.** Sunucu, `dependsOn` bağlarından topolojik sıralama ile aşamaları hesaplar. Aynı aşamadaki işler eşzamanlılık sınırına kadar paralel başlar.
 
+**Zamanlayıcı** (`packages/server/src/plans/scheduler.ts`). Plan onaylanınca, kesilen plan sürdürülünce ve her run'ın commit işi bitince tetiklenir (zamanlayıcı yok, proje başına tek sıra). Çalışan plandaki, bağımlılıkları bitmiş `planned` işleri aşama ve plan sırasıyla başlatır; aynı anda çalışan iş sayısı ekibin `concurrency` ayarını geçmez (projedeki elle eklenmiş görevler de sayılır). Başarısız ya da durdurulan iş yeniden denenmez; ona bağlı işler `blocked` kalır. Başlatılamayan iş (birleştirme çatışması, kapalı ajan) `blocked` olur ve `blockedReason` ile işaretlenir, sıraya tekrar girmez. Bütün işleri `in_review`/`done` olan plan `done` olur.
+
 **Çakışma önleme (3 katman)**
 
-1. Plan zamanı: aynı aşamadaki iki işin `expectedFiles` listeleri çakışıyorsa (glob desenleri dahil, emin olunamayan durumda çakışıyor sayılır) sunucu ikisini ardışık yapar (plandaki sırasıyla, sonraki öncekine bağımlı olur) ve plan ekranında bunu uyarı olarak gösterir. Aynı dosyaya dokunan üç iş `a → b → c` zinciri olur. Planlayıcı de aynı kuralı talimat olarak alır.
+1. Plan zamanı: aynı aşamadaki iki işin `expectedFiles` listeleri çakışıyorsa (glob desenleri dahil, emin olunamayan durumda çakışıyor sayılır) sunucu ikisini ardışık yapar (plandaki sırasıyla, sonraki öncekine bağımlı olur) ve plan ekranında nedenini not olarak gösterir ("“B”, “A” ile aynı dosyalara dokunduğu için ondan sonra çalışacak (src/x.ts)"). Aynı dosyaya dokunan üç iş `a → b → c` zinciri olur. Planlayıcı de aynı kuralı talimat olarak alır. Ayrıca her işin `expectedFiles`'ı ajanının `owns` yollarıyla karşılaştırılır; alan dışına yazacak iş uyarı alır (`owns`'u boş ajan denetlenmez).
 2. Çalışma zamanı: her iş kendi worktree ve dalında koşar. Bağımlı bir iş, önceki işin dalından başlar (yığın dallar), böylece önceki işin tip ve dosyalarını görür.
 3. Birleştirme zamanı: iş bitince `git diff --name-only` gerçek dosyaları verir. Beklenenin dışına çıkılmışsa inceleme ekranında bu not edilir. Birleştirme çakışırsa iş "Değişiklik gerekli" durumuna düşer ve ilgili ajan güncel dalı alarak çözmesi için çalıştırılır.
 
-**Plan onayı.** Ayar açıksa hiçbir ajan plan onaylanmadan başlamaz. Planlayıcının `openDecisions` soruları bu ekranda cevaplanır; cevaplanmamış karar varken plan başlatılamaz. Kullanıcı kart silebilir, ekleyebilir, ajanı değiştirebilir; sunucu değişiklikten sonra aşamaları ve çakışma kontrolünü yeniden hesaplar. "Planı yeniden oluştur" aynı isteği Planner'a tekrar verir.
+**Plan onayı** (v2-06). Ayar açıksa hiçbir ajan plan onaylanmadan başlamaz. Önce "Önce şunları netleştirelim" kutusu gelir: Planlayıcının `openDecisions` soruları seçenek kartları ve serbest metinle cevaplanır; cevaplar bitmeden görev kartları gösterilmez ve plan başlatılamaz. Sonra aşama aşama görev kartları (beklenen dosyalar, bekledikleri işler, aynı dosya yüzünden eklenen sıra, alan dışı uyarısı, talimat), çakışma kontrolü paneli ve özet (ajan sayısı, beklenen dosya sayısı, ajanların bütçe sınırlarından "en fazla" harcama) gelir. Kullanıcı kart kaldırabilir (ona bağlı işler onun bağımlılıklarını devralır, yalnızca o işi ilgilendiren sorular düşer) ve ajanı değiştirebilir (yalnızca açık, dosya yazabilen ajanlar); sunucu her değişiklikten sonra aşamaları ve çakışma kontrolünü yeniden hesaplar. Kart ekleme yok. "Planı yeniden oluştur" planı bırakıp aynı isteği Planlayıcıya yeniden verir. Onayda her işin talimatına, onu ilgilendiren soruların cevapları eklenir (`taskPromptWithAnswers`); cevaplar `decisions` tablosuna `planner` kaynağıyla yazılır. Ekip ayarında `requirePlanApproval` kapalıysa plan onaysız başlar; açık soru varsa yalnızca cevaplar beklenir ("Cevapla ve başlat").
 
 **Reviewer.** Salt okunur araçlarla çalışır (`Read, Grep, Glob` ve diff için kısıtlı `Bash`). Çıktısı şemalı JSON: `summary` (sade dil), `risk` (düşük, orta, yüksek), `checks[]` (başlık, not, durum), `files[]`. Bu çıktı İnceleme ekranını doğrudan besler. Proje ayarlarında bir test komutu tanımlıysa test sonucu da kontrollere eklenir.
 
@@ -338,8 +356,8 @@ Tek bir SQLite dosyası, kullanıcının ana dizininde: `~/.squadboard/squadboar
 | Tablo | Ana alanlar |
 | --- | --- |
 | `projects` | id, yol, ana dal, test komutu, ayarlar |
-| `requests` | id, project, metin, oluşturma zamanı, plan JSON'u |
-| `tasks` | id (tüm sistemde tekil; plandaki kısa kimlikler istek içinde tekil olduğundan sunucu bunları ad alanına koyar), request, başlık, ajan, bağımlılıklar, beklenen dosyalar, dal, worktree yolu, başlangıç dalı ve commit'i, değişen dosyalar, beklenmeyen dosyalar, git hatası, durum, aşama |
+| `requests` | id, project, metin, oluşturma zamanı, plan JSON'u (kullanıcının düzenlemeleriyle), durum (`planning`, `awaiting_approval`, `running`, `interrupted`, `done`, `failed`, `cancelled`; elle eklenen görevin isteğinde boş), hata ve ayrıntısı, planlama adımları, Planlayıcı maliyeti, onay zamanı |
+| `tasks` | id (tüm sistemde tekil; plandaki kısa kimlikler istek içinde tekil olduğundan onayda her işe yeni kimlik verilir), request, başlık, talimat (planlı işte; elle eklenende isteğin metni), ajan, bağımlılıklar, beklenen dosyalar, dal, worktree yolu, başlangıç dalı ve commit'i, değişen dosyalar, beklenmeyen dosyalar, git hatası, başlatılamama nedeni, durum, aşama |
 | `runs` | id, task, oturum kimliği, çalışma klasörü (resume için), devam ettirdiği run, pid, exit code, hata, başlangıç, bitiş, sonuç durumu, maliyet, tur sayısı |
 | `events` | id, run, sıra (`run` içinde tekil), tip, `AgentEvent` JSON'u, ham CLI satırı (o satırdan çıkan ilk olayda) |
 | `decisions` | id, request, task (Planner kararlarında boş), kaynak (`planner` / `agent`), soru, seçenekler, seçim, zaman |
@@ -360,7 +378,7 @@ Tek bir SQLite dosyası, kullanıcının ana dizininde: `~/.squadboard/squadboar
 
 Geçişler `packages/core` içindeki durum makinesinde tanımlıdır; geçersiz geçiş hata verir. Bir iş `in_review`'dan geçmeden `done` olamaz.
 
-Sunucu başlangıcında çalışıyor görünen ama süreci ölen işleri `stopped` yapar ve "Kaldığı yerden sürdür" seçeneği sunar (`--resume` ile, işin kendi worktree klasöründen).
+Sunucu başlangıcında çalışıyor görünen ama süreci ölen işleri `stopped` yapar ve "Kesildi" diye gösterir (Aşama 8). "Kaldığı yerden sürdür" seçeneği (`--resume` ile, işin kendi worktree klasöründen) Aşama 11'de gelecek.
 
 ## Güvenlik ve izinler
 
@@ -373,7 +391,7 @@ Uygulama bilgisayarında kod çalıştıran ajanları yönetiyor; bu yüzden var
 
   `squadboard` komutu adresi `http://127.0.0.1:4317/#token=…` olarak yazar ve tarayıcıyı açar. Anahtar URL'nin **fragment** kısmındadır: sunucuya, loglara ve Referer başlığına gitmez. Sayfa onu yalnızca bellekte tutar (localStorage'a yazmaz); adres çubuğunda kaldığı için sayfa yenilenince çalışmaya devam eder. Sayfanın kendisi (statik dosyalar) anahtarsız sunulur, içinde gizli bilgi yoktur.
 - **Ajan sınırları.** Her ajan yalnızca kendi worktree klasöründe ve kendi araç beyaz listesiyle çalışır. Her yetkiyi atlayan bayrak (`--dangerously-skip-permissions`) kullanılmaz.
-- **Gizli dosyalar.** `.env` ve anahtar dosyalarının okunmasını yasaklayan izin kuralları şablonla gelir. Kural söz dizimi hedef Claude Code sürümünde doğrulanmalıdır.
+- **Gizli dosyalar.** `.env` ve anahtar dosyalarının okunmasını yasaklayan izin kuralları **henüz yok**: Aşama 7 şablonları yalnızca araç kümesini sınırlıyor, `Read` aracı `.env`'i okuyabilir. Kurallar (ör. `--disallowedTools "Read(.env*)"`) Aşama 11'de eklenecek; söz dizimi hedef Claude Code sürümünde doğrulanmalıdır.
 - **Sınırlar.** `--max-budget-usd` (asıl sınır; `--max-turns` belgelenmemiş olduğu için yalnızca ek önlem), iş başına zaman aşımı ve eşzamanlılık üst sınırı (varsayılan 3). Durdurma basılınca süreç ağacının tamamı sonlandırılır (Windows'ta `taskkill /T /F`); yalnızca `claude` sürecini öldürmek ajanın başlattığı komutları yetim bırakır.
 - **Birleştirme.** Hiçbir dal sen onaylamadan birleşmez. Uzak depoya push v1'de yoktur. Zorla push hiç yoktur.
 - **Komut enjeksiyonu.** Dosya ve web içeriği ajanı yönlendirmeye çalışabilir. Bu yüzden Reviewer çıktısı kesin hakem sayılmaz; diff her zaman "kodun tamamını göster" ile açılabilir, otomatik birleştirme varsayılan değildir.
@@ -415,10 +433,10 @@ Numaralar "Aşama Planı ve Promptlar" belgesindeki aşamalarla aynıdır.
 | 5. Proje, görev ve git worktree | Git servisi, proje ekleme, görev oluşturma ve başlatma, her görev kendi worktree ve `team/` dalında, yığın dallar, değişen/beklenmeyen dosyalar, temizlik, sıralı görev listesi | İki görev aynı anda ayrı worktree'lerde çalışıyor; kullanıcının klasöründe hiçbir dosya değişmiyor; git testleri yeşil, worktree temizlenebiliyor | ✅ (elle denendi) |
 | 6. Pano ve tasarım sistemi | Tasarım token'ları (v2 paleti, Nunito + JetBrains Mono, 44 px / 13 px), uygulama kabuğu (menü, proje hapı, isim modu, bugünkü maliyet, mobil sekme çubuğu), v2-19 temel bileşenleri, Pano (karşılama, ajan şeridi, 4 sütun, görev kartları, ajan detayı), boş ve hata durumları; TanStack Query + SSE + Zustand, 2 sn yoklama kaldırıldı | Pano gerçek API ile açılıyor ve canlı güncelleniyor; isim modu değişip kalıcı; 390 px'te yatay taşma yok; Playwright smoke testleri CI'da yeşil | ✅ (smoke testleri; elle deneme bekliyor) |
 | 7. Şablonlar ve Ekibini kur | `.team/team.json` şeması ve doğrulama, hazır şablonlar (`fullstack-web`, `minimal`) ve `.claude/agents/` dosyaları, ajan başına araç, model, bütçe ve izin, Ekibini kur (v2-07) ve Ekip (v2-11) ekranları; ana dalın her görevde yeniden tespiti, Türkçe git hataları, proje silme | Şablon kurulunca `.team/` ve `.claude/agents/` oluşuyor; isimler ve renkler şablondan geliyor; İnceleyici salt okunur; ajan ayarları çalıştırmaya yansıyor; elle düzenlenen `team.json` doğrulanıyor; `master` deposunda görev açılıyor | ✅ (testler; elle deneme bekliyor) |
-| 8. Planner ve scheduler | Planner (`--json-schema`, `openDecisions`), Plan onayı ekranı (v2-05, v2-06), bağımlılık ve çakışma kontrolü, eşzamanlılık sınırıyla zamanlayıcı | Tek istekten 4-5 iş sırayla ve paralel çalışıyor | |
+| 8. Planner ve scheduler | Planner (`--json-schema`, `openDecisions`, yalnızca açık ajanlar, salt okunur, bir yeniden deneme), Planlayıcı düşünüyor (v2-05) ve Plan onayı (v2-06) ekranları, bağımlılık, çakışma ve `owns` kontrolü, eşzamanlılık sınırıyla zamanlayıcı, çoklu bağımlılık için geçici taban dalı, `requirePlanApproval`, kapanışta ve açılışta "kesildi" | Tek istekten 4-5 iş sırayla ve paralel çalışıyor | ✅ (sahte CLI ile uçtan uca testler; elle deneme bekliyor) |
 | 9. Karar ve izin akışı | Plan kararlarının onayda cevaplanması, KARAR yedek akışı, izin kartı (`permission_denials` → izin → `--resume`), Karar ekranı (v2-03) | Plan kararları onayda cevaplanıyor; ajan durunca karar ya da izin kartı çıkıyor, cevaptan sonra aynı oturum sürüyor | |
 | 10. Reviewer ve merge | Reviewer şeması, İnceleme ekranı (v2-08), test komutu, Onayla ve birleştir (v2-09), Değişiklik iste | İnceleme akışı uçtan uca çalışıyor; onaylanan dal ana dala birleşiyor, worktree temizleniyor | |
-| 11. Dayanıklılık ve güvenlik | Sunucu yeniden başlayınca yarım kalan run ve görevlerin toparlanması, kredi ve limit bitimi (v2-16), Claude bulunamadı (v2-15) gibi hata durumları, güvenlik denetiminin gözden geçirilmesi | Çökme ya da kapanış sonrası veri kaybolmuyor, yetim süreç kalmıyor; hata ekranları gerçek durumlarda çıkıyor | |
+| 11. Dayanıklılık ve güvenlik | Sunucu yeniden başlayınca yarım kalan run ve görevlerin toparlanması, kredi ve limit bitimi (v2-16), Claude bulunamadı (v2-15) gibi hata durumları, güvenlik denetiminin gözden geçirilmesi, `.env` ve anahtar dosyalarını okumayı yasaklayan izin kuralları | Çökme ya da kapanış sonrası veri kaybolmuyor, yetim süreç kalmıyor; hata ekranları gerçek durumlarda çıkıyor | |
 | 12. Yayın | `npx` paketi, Windows/macOS/Linux denemesi, README (kurulum, kredi uyarısı), lisans, kısa demo videosu | Temiz bir bilgisayarda tek komutla kurulup ilk işin bittiği görülüyor | |
 | Sonrası | Topluluk şablonları, başka alanlar (içerik ekibi gibi), başka CLI sürücüleri, masaüstü kabuğu | Talebe göre | |
 
@@ -453,9 +471,9 @@ Aşama 1 en riskli adımdı ve raporun birkaç varsayımını değiştirdi (izin
 
 **Alınan kararlar (17 Kasım 2026)**
 
-- **İlk sürüm yalnızca Claude Code.** Çoklu CLI desteği ve ajan başına model seçimi sonraya. Sürücü soyutlaması baştan hazır kalır, böylece sonra başka CLI eklemek kolay olur.
+- **İlk sürüm yalnızca Claude Code.** Çoklu CLI desteği sonraya. Ajan başına model seçimi ajan dosyasındaki `model` alanıyla geldi (Aşama 7). Sürücü soyutlaması baştan hazır kalır, böylece sonra başka CLI eklemek kolay olur.
 - **Worktree'yi biz açıyoruz** (`git worktree add`): dal adı (`team/auth-api`) ve yığın dallar bizde kalır, kullanıcı temiz dal adları görür.
-- **İzinler kullanıcıyı yormasın:** `--permission-mode acceptEdits` ve ajan başına `--allowedTools` beyaz listesi. Ajan listede olmayan bir aracı isterse CLI onu reddeder ama işi durdurmaz; runner iş bitince `result.permission_denials[]`'a bakar, boş değilse arayüzde "Şu komuta izin verelim mi?" kartı çıkar; onaylanırsa liste genişler ve oturum `--resume` ile sürer. MCP izin bayrağı v1'de kullanılmıyor. (Aşama 1 bulgusuyla güncellendi.)
+- **İzinler kullanıcıyı yormasın:** `--permission-mode acceptEdits`, ajan başına araç kümesi `--tools` ile (asıl sınır) ve aynı liste `--allowedTools` ile otomatik onaylı; `Bash` hiçbir zaman otomatik onaylanmaz (Aşama 7). Ajan listede olmayan bir aracı isterse CLI onu reddeder ama işi durdurmaz; runner iş bitince `result.permission_denials[]`'a bakar, boş değilse arayüzde "Şu komuta izin verelim mi?" kartı çıkar; onaylanırsa liste genişler ve oturum `--resume` ile sürer. MCP izin bayrağı v1'de kullanılmıyor. (Aşama 1 bulgusuyla güncellendi.)
 - **Lisans: MIT.** En düşük sürtünme, katkı vermek ve kullanmak en kolay olanı.
 - **Ürün adı: Squadboard.** npm'de "squadboard" boş. GitHub'da aynı adlı birkaç küçük depo var; biri (sabbour/squadboard) "Squad AI ajanları için yerel kanban panosu" diyor, 0 yıldızlı ama konsept benziyor. Alan adı ve marka kaydı bir kayıtçiden kontrol edilmeli.
 - **Kararları Planner soruyor** (Aşama 1 ölçümünden sonra). Planner, plan aşamasında açık kararları `openDecisions[]` olarak üretir, kullanıcı plan onayında cevaplar. KARAR bloğu yalnızca ajanın çalışırken karşılaştığı beklenmedik seçimler için yedektir ve tüm soruları tek seferde sorar (çok sorulu biçim).
