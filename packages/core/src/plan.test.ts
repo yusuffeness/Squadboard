@@ -15,7 +15,7 @@ const task = (
   dependsOn: string[] = [],
   expectedFiles: string[] = [],
   agent = 'backend',
-): PlanTask => ({ id, title: `Task ${id}`, agent, dependsOn, expectedFiles });
+): PlanTask => ({ id, title: `Task ${id}`, agent, dependsOn, expectedFiles, prompt: '' });
 
 // Example from docs/ARCHITECTURE.md
 const authPlan: PlanInput = {
