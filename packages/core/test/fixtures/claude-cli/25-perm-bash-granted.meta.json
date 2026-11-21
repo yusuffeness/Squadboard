@@ -1,0 +1,30 @@
+{
+  "name": "25-perm-bash-granted",
+  "claudeVersion": "2.1.150 (Claude Code)",
+  "platform": "win32",
+  "recordedOn": "2026-11-21",
+  "args": [
+    "-p",
+    "The user granted permission for: npm test. Try again.",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--strict-mcp-config",
+    "--model",
+    "haiku",
+    "--max-budget-usd",
+    "0.10",
+    "--resume",
+    "7f1c2a10-0000-4000-8000-0000000000b1",
+    "--permission-mode",
+    "acceptEdits",
+    "--tools",
+    "Read,Edit,Write,Glob,Grep,Bash",
+    "--allowedTools",
+    "Read,Edit,Write,Glob,Grep,Bash(npm test),Bash(npm run lint:*)"
+  ],
+  "exitCode": 0,
+  "durationMs": 7504,
+  "stderr": "",
+  "cwdNote": "resumed in the same sandbox as 24"
+}

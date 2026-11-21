@@ -1,0 +1,32 @@
+{
+  "name": "23-ask-resume-answer",
+  "claudeVersion": "2.1.150 (Claude Code)",
+  "platform": "win32",
+  "recordedOn": "2026-11-21",
+  "args": [
+    "-p",
+    "The user answered your questions:\n1. Which storage technology should be used for persistence? → JSON file (Recommended)\n2. What data should be stored per addition? → Operands + result (Recommended)\n3. What should the public API look like? → add() auto-saves, new listResults() (Recommended)\nContinue the task with these answers.",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--strict-mcp-config",
+    "--resume",
+    "ca76d19d-f362-415e-beb3-00585c5f3b66",
+    "--permission-mode",
+    "acceptEdits",
+    "--allowedTools",
+    "Read,Edit,Write,Glob,Grep",
+    "--tools",
+    "Read,Edit,Write,Glob,Grep,AskUserQuestion",
+    "--model",
+    "sonnet",
+    "--max-budget-usd",
+    "0.40",
+    "--append-system-prompt",
+    "You are the Backend agent of this project.\nBefore you modify ANY file, check whether the task leaves any of these unspecified:\n- storage technology or file format\n- adding a new dependency or library\n- public API shape or function names\n- data schema\n- behaviour visible to end users\nIf ANY of them is unspecified, you must NOT pick a default yourself and must NOT modify files.\nStop immediately and call the AskUserQuestion tool ONCE with ALL open questions (2-4 options each).\nIn this environment the tool cannot show the questions itself; they are forwarded to the user.\nAfter the call, end your turn with one short sentence. The answers arrive as the next message.\nOnly if the task specifies all of the above, do the task without asking."
+  ],
+  "exitCode": 0,
+  "durationMs": 17978,
+  "stderr": "",
+  "cwdNote": "resumed in the same sandbox as 22"
+}

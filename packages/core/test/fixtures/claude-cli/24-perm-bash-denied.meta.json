@@ -1,0 +1,29 @@
+{
+  "name": "24-perm-bash-denied",
+  "claudeVersion": "2.1.150 (Claude Code)",
+  "platform": "win32",
+  "recordedOn": "2026-11-21",
+  "args": [
+    "-p",
+    "Run the project's tests with `npm test` and the linter with `npm run lint`, then report the results in one sentence.",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--strict-mcp-config",
+    "--model",
+    "haiku",
+    "--max-budget-usd",
+    "0.10",
+    "--session-id",
+    "7f1c2a10-0000-4000-8000-0000000000b1",
+    "--permission-mode",
+    "acceptEdits",
+    "--tools",
+    "Read,Edit,Write,Glob,Grep,Bash",
+    "--allowedTools",
+    "Read,Edit,Write,Glob,Grep"
+  ],
+  "exitCode": 0,
+  "durationMs": 6537,
+  "stderr": ""
+}
