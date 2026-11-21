@@ -44,10 +44,14 @@ export function EventLine({ event }: { event: AgentEvent }) {
             {formatCost(event.costUsd)} · {event.numTurns ?? '?'} tur
             {event.durationMs !== null ? ` · ${(event.durationMs / 1000).toFixed(1)} sn` : ''}
           </p>
-          {event.permissionDenials.length > 0 && (
+          {event.permissionDenials.some((d) => d.toolName === 'AskUserQuestion') && (
+            <p className="text-console-warn">? Ajan soru sordu, cevabını bekliyor</p>
+          )}
+          {event.permissionDenials.some((d) => d.toolName !== 'AskUserQuestion') && (
             <p className="text-console-danger">
               İzin verilmedi:{' '}
               {event.permissionDenials
+                .filter((d) => d.toolName !== 'AskUserQuestion')
                 .map((d) => `${d.toolName} ${summarizeToolInput(d.input)}`)
                 .join(', ')}
             </p>

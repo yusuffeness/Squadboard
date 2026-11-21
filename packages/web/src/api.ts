@@ -75,6 +75,45 @@ export interface TaskView {
   createdAt: string;
   active: boolean;
   latestRun: RunView | null;
+  /** What a waiting task needs from the user (empty unless `waiting_decision`). */
+  pending: PendingView;
+}
+
+/** Mirrors the views in packages/server/src/decisions/decision-service.ts. */
+export interface QuestionView {
+  id: string;
+  question: string;
+  /** Empty: answer in free text. */
+  options: string[];
+  multiSelect: boolean;
+  /** The agent tried to ask but the question could not be read; `question` is what it wrote. */
+  problem: string | null;
+}
+
+export interface PermissionView {
+  id: string;
+  tool: string;
+  command: string | null;
+  path: string | null;
+  /** What "Hep izin ver" writes to .team/team.json. */
+  rule: string;
+}
+
+export interface PendingView {
+  questions: QuestionView[];
+  permissions: PermissionView[];
+  /** How many times this task's agent has asked (1 = first time). */
+  round: number;
+}
+
+/** once = "Bir kez", task = "İzin ver" (this task), always = "Hep izin ver" (this project). */
+export type PermissionAction = 'once' | 'task' | 'always' | 'denied';
+
+export interface AnswerInput {
+  answers?: Record<string, string>;
+  /** "Ajanın kararına bırak". */
+  delegate?: boolean;
+  note?: string;
 }
 
 /** Mirrors AgentView in packages/server/src/team/team-service.ts. */
@@ -100,6 +139,8 @@ export interface TeamView {
   description: string | null;
   settings: ProjectSettings;
   agents: AgentView[];
+  /** Allow rules of every run (`--allowedTools`): from team.json or derived from the project. */
+  permissions: { allow: string[]; fromFile: boolean };
 }
 
 export type TeamState =
@@ -278,6 +319,10 @@ export function createApi(token: string) {
       request<TaskView>('POST', `/api/projects/${projectId}/tasks`, task),
     startTask: (id: string) => request<TaskView>('POST', `/api/tasks/${id}/start`),
     stopTask: (id: string) => request<TaskView>('POST', `/api/tasks/${id}/stop`),
+    answerTask: (id: string, input: AnswerInput) =>
+      request<TaskView>('POST', `/api/tasks/${id}/answer`, input),
+    respondPermission: (taskId: string, permissionId: string, action: PermissionAction) =>
+      request<TaskView>('POST', `/api/tasks/${taskId}/permissions/${permissionId}`, { action }),
     cleanupTask: (id: string, deleteBranch: boolean) =>
       request<TaskView>('POST', `/api/tasks/${id}/cleanup`, { deleteBranch }),
     stopRun: (id: string) => request<RunView>('POST', `/api/runs/${id}/stop`),

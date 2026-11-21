@@ -1,9 +1,11 @@
 import type { TaskStatus } from '@squadboard/core';
 
-/** Statuses from which a task can be (re)started (mirrors the core state machine). */
+/**
+ * Statuses from which a task can be (re)started (mirrors the core state machine). A task that
+ * waits for the user is answered ("Cevapla"), not restarted.
+ */
 export const STARTABLE: readonly TaskStatus[] = [
   'planned',
-  'waiting_decision',
   'changes_requested',
   'failed',
   'stopped',

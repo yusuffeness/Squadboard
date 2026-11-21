@@ -13,9 +13,11 @@ import { AgentStrip } from './board/AgentStrip';
 import { Columns } from './board/Columns';
 import { Hero } from './board/Hero';
 import { PlanBanner } from './board/PlanBanner';
+import { waitingTasks } from '../lib/decision';
 import { PlanPage } from './PlanPage';
 import { Suggestions } from './board/Suggestions';
 import { TaskDetail } from './TaskDetail';
+import { WaitingTask } from './board/WaitingTask';
 
 /** Pano (v2-01, v2-02, v2-04): welcome, agent strip, four columns, or one task's detail. */
 export function BoardPage() {
@@ -111,6 +113,10 @@ export function BoardPage() {
         <>
           {route.task && tasks.isSuccess && <MissingTask />}
           {attention && <PlanBanner plan={attention} />}
+          {/* Kararın lazım (v2-03): always in the top half, before anything else on the board. */}
+          {waitingTasks(taskList).map((t) => (
+            <WaitingTask key={t.id} task={t} />
+          ))}
           {/* First run (v2-02) puts the team on top; the working board (v2-01) leads with the hero. */}
           {firstRun && <AgentStrip tasks={taskList} />}
           <Hero firstRun={firstRun} projectId={project.id} />

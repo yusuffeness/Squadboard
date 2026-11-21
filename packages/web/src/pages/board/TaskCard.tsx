@@ -2,6 +2,7 @@ import {
   CircleCheck,
   CircleHelp,
   Clock,
+  MessageCircleQuestion,
   File,
   GitBranch,
   Play,
@@ -14,6 +15,7 @@ import type { TaskView } from '../../api';
 import { STARTABLE, summarizeToolInput } from '../../format';
 import { useAgents } from '../../lib/agents';
 import { taskLook } from '../../lib/board';
+import { focusDecision, pendingLabel } from '../../lib/decision';
 import { blockedLine } from '../../lib/plan';
 import { useLiveTask, useTaskActions } from '../../lib/queries';
 import { navigate } from '../../lib/router';
@@ -86,7 +88,10 @@ export function TaskCard({ task, all }: { task: TaskView; all: readonly TaskView
           </Meta>
         )}
         {task.status === 'waiting_decision' && !task.active && (
-          <Meta icon={CircleHelp}>Ajan durdu, senden cevap bekliyor</Meta>
+          <Meta icon={CircleHelp}>
+            Ajan durdu, senden cevap bekliyor
+            {pendingLabel(task.pending) ? ` (${pendingLabel(task.pending)})` : ''}
+          </Meta>
         )}
         {task.branch && (
           <Meta icon={GitBranch}>
@@ -128,6 +133,15 @@ export function TaskCard({ task, all }: { task: TaskView; all: readonly TaskView
             onClick={() => actions.stop.mutate(task.id)}
           >
             Durdur
+          </Button>
+        )}
+        {task.status === 'waiting_decision' && !task.active && (
+          <Button
+            variant="primary"
+            icon={MessageCircleQuestion}
+            onClick={() => focusDecision(task.id)}
+          >
+            Cevapla
           </Button>
         )}
         {canStart && (
