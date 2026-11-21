@@ -288,3 +288,14 @@ Bulgular:
 5. Sahte CLI ile test edilebilir: testler `claude`'a giden argümanlara bakar.
 
 Not: proje ajanları worktree'de alt ajan olarak da listeleniyor (`init.agents`). Squadboard'ın ajanlarında alt ajan çağıran araç (`Task`/`Agent`) `--tools` listesinde olmadığı için kullanılamıyorlar.
+
+## 16. Planlayıcı ve zamanlayıcı (Aşama 8)
+
+Bu aşamada gerçek CLI ile yeni bir deney yapılmadı; Planlayıcı çağrısı §4'teki `--json-schema` bulgularına dayanıyor ve testler sahte CLI ile çalışıyor (`FAKE_CLAUDE_PLANS`: `17-json-schema-stream.jsonl` kaydını, istenen planı `structured_output` yaparak oynatır). Gerçek bir küçük repoda elle denenmesi gerekiyor.
+
+- **Çağrı.** `claude -p "<istek + açık ajanlar + kurallar>" --output-format stream-json --verbose --strict-mcp-config --session-id <yeni> --permission-mode default --tools Read,Glob,Grep --allowedTools Read,Glob,Grep --append-system-prompt <planner.md> --model <planner.md> --max-budget-usd <team.json> --json-schema <planJsonSchema>`. Çalışma klasörü kullanıcının kendi klasörü: araçlar salt okunur olduğu için dosya yazamaz, worktree açmaya gerek yok.
+- **Şemada `enum`.** `agent` alanı açık ve dosya yazabilen ajanların kimlikleriyle sınırlı (§4'te `enum`'a uyulduğu görüldü). Yine de sunucu `validatePlan` ile tekrar bakar; CLI'ın denetimi bizim denetimimiz değil.
+- **`structured_output` yoksa** (model şemaya uymayan bir şeyle bitirirse) ya da doğrulama düşerse, aynı istek sorunun açıklamasıyla yeni bir oturumda bir kez daha verilir. `--resume` kullanılmıyor: oturum kullanıcının klasörüne bağlı ve yeniden denemenin önceki yanlış cevabı görmesine gerek yok.
+- **İlerleme.** Stream'deki her `tool_use` (`Read`, `Glob`, `Grep`) "Proje dosyaları inceleniyor" adımının ayrıntısını günceller; `StructuredOutput` aracı sayılmaz. Planlama adımlarında yüzde ya da kalan süre yok, çünkü CLI vermiyor (§14).
+- **Kabuk yok.** Hiçbir şablon ajanında `Bash` yok; Planlayıcıya bu açıkça söylenir ve "testleri çalıştır" görevi yazmaması istenir. Test komutu izni Aşama 9'un işi.
+- **Açık soru.** Gerçekçi isteklerde Planlayıcının gereksiz soru oranı ve 12 iş sınırının yeterliliği henüz ölçülmedi.

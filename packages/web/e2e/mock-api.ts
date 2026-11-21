@@ -1,6 +1,7 @@
 import type { Page } from '@playwright/test';
 import type {
   AgentView,
+  PlanView,
   ProjectChecks,
   ProjectView,
   RunView,
@@ -60,6 +61,10 @@ function task(id: string, over: Partial<TaskView>): TaskView {
     unexpectedFiles: [],
     gitError: null,
     gitErrorDetail: null,
+    blockedReason: null,
+    interrupted: false,
+    planId: null,
+    stage: 0,
     createdAt: iso(60),
     active: false,
     latestRun: null,
@@ -228,6 +233,103 @@ export const CHECKS: ProjectChecks = {
   claude: { ok: true, version: '2.1.150' },
 };
 
+const planTask = (
+  id: string,
+  title: string,
+  agent: string,
+  stage: number,
+  expectedFiles: string[],
+  dependsOn: string[] = [],
+  over: Partial<NonNullable<PlanView['plan']>['tasks'][number]> = {},
+) => ({
+  id,
+  title,
+  agent,
+  prompt: `${title} yap.`,
+  dependsOn,
+  runsAfter: dependsOn,
+  expectedFiles,
+  stage,
+  outsideOwns: [],
+  agentUnavailable: false,
+  ...over,
+});
+
+/** "Giriş sayfası ve API ekle", as the server shows it while it waits for approval. */
+export const LOGIN_PLAN: PlanView = {
+  id: 'plan-1',
+  projectId: 'p1',
+  text: 'Giriş sayfası ve API ekle',
+  status: 'awaiting_approval',
+  error: null,
+  errorDetail: null,
+  steps: [
+    {
+      id: 'team',
+      label: 'Ekip okundu',
+      detail: '4 açık ajan',
+      status: 'done',
+      startedAt: iso(2),
+      endedAt: iso(2),
+    },
+  ],
+  plannerCostUsd: 0.03,
+  createdAt: iso(2),
+  approvedAt: null,
+  requirePlanApproval: true,
+  plan: {
+    tasks: [
+      planTask('db', 'Kullanıcı tablosu', 'database', 0, ['src/db/users.ts']),
+      planTask('api', 'Giriş API', 'backend', 1, ['src/api/auth.ts'], ['db']),
+      planTask(
+        'ui',
+        'Giriş formu',
+        'frontend',
+        1,
+        ['src/pages/login.tsx', 'src/api/auth.ts'],
+        ['db'],
+        { runsAfter: ['db', 'api'], outsideOwns: ['src/api/auth.ts'] },
+      ),
+    ],
+    openDecisions: [
+      {
+        id: 'session',
+        question: 'Oturum nasıl tutulsun?',
+        options: ['Cookie', 'JWT'],
+        taskIds: ['api'],
+      },
+    ],
+    stages: [['db'], ['api'], ['ui']],
+    notes: [
+      '“Giriş formu”, “Giriş API” ile aynı dosyalara dokunduğu için ondan sonra çalışacak (src/api/auth.ts).',
+    ],
+    warnings: ['“Giriş formu” Ön Yüz ajanının alanı dışına yazacak: src/api/auth.ts'],
+    summary: { agents: 3, files: 3, maxCostUsd: 3 },
+    assignableAgents: ['frontend', 'backend', 'database', 'test'],
+  },
+  progress: null,
+};
+
+/** The same request while the Planner is still reading the project. */
+export const PLANNING: PlanView = {
+  ...LOGIN_PLAN,
+  id: 'plan-2',
+  status: 'planning',
+  plan: null,
+  plannerCostUsd: null,
+  steps: [
+    ...LOGIN_PLAN.steps,
+    {
+      id: 'explore-1',
+      label: 'Proje dosyaları inceleniyor',
+      detail: '3 bakış · son: Read src/app.ts',
+      status: 'running',
+      startedAt: iso(1),
+      endedAt: null,
+    },
+  ],
+};
+
 export interface MockOptions {
   projects?: ProjectView[];
   tasks?: TaskView[];
@@ -236,6 +338,9 @@ export interface MockOptions {
   checks?: ProjectChecks;
   /** Files the install reports as existing with other content (409 until overwrite). */
   conflicts?: string[];
+  plans?: PlanView[];
+  /** What `POST …/plans` answers with. Default: PLANNING. */
+  newPlan?: PlanView;
 }
 
 /** What the page sent, for assertions. */
@@ -244,6 +349,10 @@ export interface MockLog {
   agentPatches: { agentId: string; body: unknown }[];
   settingsPatches: unknown[];
   deleted: string[];
+  planRequests: unknown[];
+  planEdits: unknown[];
+  approvals: unknown[];
+  newTasks: unknown[];
 }
 
 /** Answers every API call in the page. Unknown calls fail loudly so tests notice. */
@@ -251,7 +360,21 @@ export async function mockApi(page: Page, opts: MockOptions = {}): Promise<MockL
   let projects = opts.projects ?? [PROJECT];
   const tasks = opts.tasks ?? TASKS;
   let team: TeamState = opts.team ?? teamOf(TEMPLATE);
-  const log: MockLog = { installs: [], agentPatches: [], settingsPatches: [], deleted: [] };
+  let plans = opts.plans ?? [];
+  const log: MockLog = {
+    installs: [],
+    agentPatches: [],
+    settingsPatches: [],
+    deleted: [],
+    planRequests: [],
+    planEdits: [],
+    approvals: [],
+    newTasks: [],
+  };
+  const putPlan = (plan: PlanView) => {
+    plans = [plan, ...plans.filter((p) => p.id !== plan.id)];
+    return plan;
+  };
 
   await page.route('**/health', (r) => r.fulfill({ json: { status: 'ok' } }));
   await page.route('**/api/**', (route) => {
@@ -326,7 +449,65 @@ export async function mockApi(page: Page, opts: MockOptions = {}): Promise<MockL
       team.team.settings = { ...team.team.settings, ...body() };
       return route.fulfill({ json: team.team });
     }
-    if (/^\/api\/projects\/[^/]+\/tasks$/.test(path)) return route.fulfill({ json: { tasks } });
+    if (/^\/api\/projects\/[^/]+\/tasks$/.test(path)) {
+      if (method === 'POST') {
+        log.newTasks.push(body());
+        return route.fulfill({ status: 201, json: tasks[0] });
+      }
+      return route.fulfill({ json: { tasks } });
+    }
+    if (/^\/api\/projects\/[^/]+\/plans$/.test(path)) {
+      if (method === 'POST') {
+        log.planRequests.push(body());
+        const created = putPlan({ ...(opts.newPlan ?? PLANNING), text: String(body().text) });
+        return route.fulfill({ status: 201, json: created });
+      }
+      return route.fulfill({ json: { plans } });
+    }
+    if (/^\/api\/projects\/[^/]+\/events$/.test(path)) {
+      return route.fulfill({
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+        body: 'retry: 600000\n\n',
+      });
+    }
+    const planAction = /^\/api\/plans\/([^/]+)(?:\/(approve|cancel|resume))?$/.exec(path);
+    if (planAction) {
+      const plan = plans.find((p) => p.id === planAction[1]);
+      if (!plan) return route.fulfill({ status: 404, json: { error: 'Plan bulunamadı' } });
+      const action = planAction[2];
+      if (method === 'PATCH' && plan.plan) {
+        const edit = body();
+        log.planEdits.push(edit);
+        const tasksNow =
+          typeof edit.removeTask === 'string'
+            ? plan.plan.tasks.filter((t) => t.id !== edit.removeTask)
+            : plan.plan.tasks.map((t) =>
+                t.id === edit.taskId ? { ...t, agent: String(edit.agent) } : t,
+              );
+        return route.fulfill({
+          json: putPlan({
+            ...plan,
+            plan: {
+              ...plan.plan,
+              tasks: tasksNow,
+              stages: plan.plan.stages
+                .map((ids) => ids.filter((id) => tasksNow.some((t) => t.id === id)))
+                .filter((ids) => ids.length > 0),
+            },
+          }),
+        });
+      }
+      if (action === 'approve') {
+        log.approvals.push(body());
+        return route.fulfill({ json: putPlan({ ...plan, status: 'running' }) });
+      }
+      if (action === 'cancel')
+        return route.fulfill({ json: putPlan({ ...plan, status: 'cancelled' }) });
+      if (action === 'resume')
+        return route.fulfill({ json: putPlan({ ...plan, status: 'running' }) });
+      return route.fulfill({ json: plan });
+    }
     if (path === '/api/runs') return route.fulfill({ json: { runs: RUNS } });
     if (/^\/api\/runs\/[^/]+\/events$/.test(path)) {
       const body = SSE_EVENTS.map(

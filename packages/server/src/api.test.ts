@@ -395,3 +395,40 @@ describe('team API', () => {
     expect((await api('DELETE', `/api/projects/${project.id}`)).status).toBe(404);
   });
 });
+
+describe('plan API', () => {
+  it('needs a team before planning, validates input and is behind the token', async () => {
+    const r = setup();
+    const project = (await addProject(r.repo)).body;
+    const noTeam = await api<{ error: string }>('POST', `/api/projects/${project.id}/plans`, {
+      text: 'Giriş sayfası ekle',
+    });
+    expect(noTeam.status).toBe(409);
+    expect(noTeam.body.error).toMatch(/önce bu projede ekibini kur/);
+    expect((await api('POST', `/api/projects/${project.id}/plans`, { text: '   ' })).status).toBe(
+      400,
+    );
+    expect((await api('GET', '/api/plans/nope')).status).toBe(404);
+    const anonymous = await app.inject({ method: 'GET', url: `/api/projects/${project.id}/plans` });
+    expect(anonymous.statusCode).toBe(401);
+    expect(
+      (await api<{ plans: unknown[] }>('GET', `/api/projects/${project.id}/plans`)).body.plans,
+    ).toEqual([]);
+  });
+
+  it('task views carry plan fields; a hand-made task has no plan', async () => {
+    const r = setup();
+    const project = (await addProject(r.repo)).body;
+    const created = await api<TaskView>('POST', `/api/projects/${project.id}/tasks`, {
+      title: 'Tek',
+      prompt: 'tek iş',
+    });
+    expect(created.body).toMatchObject({
+      planId: null,
+      blockedReason: null,
+      interrupted: false,
+      stage: 0,
+      prompt: 'tek iş',
+    });
+  });
+});

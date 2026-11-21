@@ -1,21 +1,32 @@
-import { ArrowRight, Sparkles } from 'lucide-react';
+import { ArrowRight, Plus, Sparkles } from 'lucide-react';
 import { useId, useState, type FormEvent } from 'react';
+import { usePlanActions } from '../../lib/queries';
+import { navigate } from '../../lib/router';
 import { useUi } from '../../lib/store';
 import { Button } from '../../ui/Button';
+import { ErrorMessage } from '../../ui/ErrorMessage';
 
 /**
- * "Ekibin hazır." welcome with the one-line request box (v2-01, v2-02, v2-18). Until the planner
- * exists the button opens the "Yeni iş" dialog with the text, which creates a single task.
+ * "Ekibin hazır." welcome with the one-line request box (v2-01, v2-02, v2-18). "Planla" gives the
+ * request to the team's Planner and opens the planning screen; "Tek görev" still opens the
+ * single-task dialog for work that needs no plan.
  */
-export function Hero({ firstRun }: { firstRun: boolean }) {
+export function Hero({ firstRun, projectId }: { firstRun: boolean; projectId: string }) {
   const [text, setText] = useState('');
   const openNewTask = useUi((s) => s.openNewTask);
+  const plans = usePlanActions(projectId);
   const inputId = useId();
 
   function submit(e: FormEvent) {
     e.preventDefault();
-    openNewTask(text.trim());
-    setText('');
+    const request = text.trim();
+    if (!request) return;
+    plans.start.mutate(request, {
+      onSuccess: (plan) => {
+        setText('');
+        navigate({ plan: plan.id, task: null });
+      },
+    });
   }
 
   return (
@@ -44,7 +55,7 @@ export function Hero({ firstRun }: { firstRun: boolean }) {
           id={inputId}
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder={firstRun ? 'Ne yapılsın?' : 'Örn: “README’ye kurulum adımlarını ekle”'}
+          placeholder={firstRun ? 'Ne yapılsın?' : 'Örn: “Giriş sayfası ve API ekle”'}
           autoComplete="off"
           className="min-h-12 min-w-0 flex-1 bg-transparent text-lg placeholder:text-faint focus:outline-none focus-visible:outline-none"
         />
@@ -53,11 +64,30 @@ export function Hero({ firstRun }: { firstRun: boolean }) {
           variant="primary"
           size="lg"
           trailingIcon={ArrowRight}
-          aria-label="Yeni iş"
+          loading={plans.start.isPending}
+          disabled={!text.trim()}
+          aria-label="Planla"
         >
-          <span className="hidden sm:inline">Yeni iş</span>
+          <span className="hidden sm:inline">Planla</span>
         </Button>
       </form>
+
+      {plans.start.isError && (
+        <ErrorMessage error={plans.start.error} prefix="Planlanamadı:" className="mt-3" />
+      )}
+      <div className="mt-3 flex flex-wrap items-center gap-x-2 text-sm text-muted">
+        <span>Plana gerek yok mu?</span>
+        <Button
+          variant="ghost"
+          icon={Plus}
+          onClick={() => {
+            openNewTask(text.trim());
+            setText('');
+          }}
+        >
+          Tek görev ekle
+        </Button>
+      </div>
 
       <HeroArt />
     </section>

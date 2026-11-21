@@ -1,4 +1,10 @@
-import type { AgentEvent, ProjectSettings, RunStatus, TaskStatus } from '@squadboard/core';
+import type {
+  AgentEvent,
+  PlanDecision,
+  ProjectSettings,
+  RunStatus,
+  TaskStatus,
+} from '@squadboard/core';
 
 /**
  * The session token comes from the URL fragment (`#token=…`) that `squadboard` printed.
@@ -59,6 +65,13 @@ export interface TaskView {
   gitError: string | null;
   /** git's own message behind gitError ("Ayrıntı"). */
   gitErrorDetail: string | null;
+  /** Why a ready task was not started (e.g. its dependencies' branches conflict). */
+  blockedReason: string | null;
+  /** Stopped because Squadboard shut down ("Kesildi"). */
+  interrupted: boolean;
+  /** The plan this task came from; null for a hand-made task. */
+  planId: string | null;
+  stage: number;
   createdAt: string;
   active: boolean;
   latestRun: RunView | null;
@@ -133,6 +146,60 @@ export interface NewTask {
   expectedFiles: string[];
   dependsOn: string | null;
 }
+
+/** Mirrors the types in packages/server/src/plans/plan-service.ts. */
+export type PlanStatus =
+  'planning' | 'awaiting_approval' | 'running' | 'interrupted' | 'done' | 'failed' | 'cancelled';
+
+export interface PlanStep {
+  id: string;
+  label: string;
+  detail: string | null;
+  status: 'running' | 'done' | 'failed';
+  startedAt: string;
+  endedAt: string | null;
+}
+
+export interface PlanTaskView {
+  id: string;
+  title: string;
+  agent: string;
+  prompt: string;
+  dependsOn: string[];
+  runsAfter: string[];
+  expectedFiles: string[];
+  stage: number;
+  outsideOwns: string[];
+  agentUnavailable: boolean;
+}
+
+export interface PlanContent {
+  tasks: PlanTaskView[];
+  openDecisions: PlanDecision[];
+  stages: string[][];
+  notes: string[];
+  warnings: string[];
+  summary: { agents: number; files: number; maxCostUsd: number };
+  assignableAgents: string[];
+}
+
+export interface PlanView {
+  id: string;
+  projectId: string;
+  text: string;
+  status: PlanStatus;
+  error: string | null;
+  errorDetail: string | null;
+  steps: PlanStep[];
+  plannerCostUsd: number | null;
+  createdAt: string;
+  approvedAt: string | null;
+  requirePlanApproval: boolean;
+  plan: PlanContent | null;
+  progress: { total: number; finished: number; failed: number; interrupted: number } | null;
+}
+
+export type PlanEdit = { removeTask: string } | { taskId: string; agent: string };
 
 export interface StreamedEvent {
   seq: number;
@@ -214,6 +281,21 @@ export function createApi(token: string) {
     cleanupTask: (id: string, deleteBranch: boolean) =>
       request<TaskView>('POST', `/api/tasks/${id}/cleanup`, { deleteBranch }),
     stopRun: (id: string) => request<RunView>('POST', `/api/runs/${id}/stop`),
+    listPlans: (projectId: string) =>
+      request<{ plans: PlanView[] }>('GET', `/api/projects/${projectId}/plans`).then(
+        (r) => r.plans,
+      ),
+    getPlan: (id: string) => request<PlanView>('GET', `/api/plans/${id}`),
+    startPlan: (projectId: string, text: string) =>
+      request<PlanView>('POST', `/api/projects/${projectId}/plans`, { text }),
+    editPlan: (id: string, edit: PlanEdit) => request<PlanView>('PATCH', `/api/plans/${id}`, edit),
+    approvePlan: (id: string, answers: Record<string, string>) =>
+      request<PlanView>('POST', `/api/plans/${id}/approve`, { answers }),
+    cancelPlan: (id: string) => request<PlanView>('POST', `/api/plans/${id}/cancel`),
+    resumePlan: (id: string) => request<PlanView>('POST', `/api/plans/${id}/resume`),
+    /** "Something changed in this project" stream (EventSource, token in the query). */
+    projectEventsUrl: (projectId: string) =>
+      `/api/projects/${projectId}/events?token=${encodeURIComponent(token)}`,
     /** EventSource cannot send headers, so the token goes in the query (GET only on the server). */
     eventsUrl: (id: string) => `/api/runs/${id}/events?token=${encodeURIComponent(token)}`,
   };

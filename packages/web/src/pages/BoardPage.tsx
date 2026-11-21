@@ -1,7 +1,8 @@
 import { FolderGit2, RotateCcw, Users } from 'lucide-react';
 import { AddProjectForm } from '../components/AddProjectForm';
 import { NewTaskDialog } from '../components/NewTaskDialog';
-import { useTasks, useTeam } from '../lib/queries';
+import { PLAN_SCREEN, planNeedingAttention } from '../lib/plan';
+import { usePlans, useProjectEvents, useTasks, useTeam } from '../lib/queries';
 import { navigate, useRoute } from '../lib/router';
 import { useUi } from '../lib/store';
 import { useCurrentProject } from '../lib/use-project';
@@ -11,6 +12,8 @@ import { Notice } from '../ui/Notice';
 import { AgentStrip } from './board/AgentStrip';
 import { Columns } from './board/Columns';
 import { Hero } from './board/Hero';
+import { PlanBanner } from './board/PlanBanner';
+import { PlanPage } from './PlanPage';
 import { Suggestions } from './board/Suggestions';
 import { TaskDetail } from './TaskDetail';
 
@@ -20,6 +23,9 @@ export function BoardPage() {
   const route = useRoute();
   const tasks = useTasks(project?.id ?? null);
   const team = useTeam(project?.id ?? null);
+  const plans = usePlans(project?.id ?? null);
+  // Live updates for the whole project (scheduler starts, plan steps) without polling.
+  useProjectEvents(project?.id ?? null);
 
   if (projects.isPending) return <BoardSkeleton />;
   if (projects.isError)
@@ -39,6 +45,9 @@ export function BoardPage() {
   const taskList = tasks.data ?? [];
   const firstRun = tasks.isSuccess && taskList.length === 0;
   const open = route.task ? taskList.find((t) => t.id === route.task) : undefined;
+  const planList = plans.data ?? [];
+  const openPlan = route.plan ? planList.find((p) => p.id === route.plan) : undefined;
+  const attention = planNeedingAttention(planList);
 
   return (
     <div className="flex flex-col gap-6 lg:gap-8">
@@ -86,14 +95,25 @@ export function BoardPage() {
         </Notice>
       )}
 
-      {open ? (
+      {route.plan && plans.isSuccess && !openPlan && (
+        <Notice
+          tone="warn"
+          action={<Button onClick={() => navigate({ plan: null })}>Panoya dön</Button>}
+        >
+          Bu plan bu projede yok.
+        </Notice>
+      )}
+      {openPlan && PLAN_SCREEN.includes(openPlan.status) ? (
+        <PlanPage plan={openPlan} />
+      ) : open ? (
         <TaskDetail task={open} tasks={taskList} />
       ) : (
         <>
           {route.task && tasks.isSuccess && <MissingTask />}
+          {attention && <PlanBanner plan={attention} />}
           {/* First run (v2-02) puts the team on top; the working board (v2-01) leads with the hero. */}
           {firstRun && <AgentStrip tasks={taskList} />}
-          <Hero firstRun={firstRun} />
+          <Hero firstRun={firstRun} projectId={project.id} />
           {!firstRun && <AgentStrip tasks={taskList} />}
           {tasks.isPending ? (
             <ColumnsSkeleton />

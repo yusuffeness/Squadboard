@@ -57,6 +57,8 @@ export const PlanTask = z.object({
   agent: z.string().min(1),
   dependsOn: z.array(id),
   expectedFiles: z.array(z.string().min(1)),
+  /** Self-contained instructions for the agent. Required in the Planner's JSON schema. */
+  prompt: z.string().default(''),
 });
 export type PlanTask = z.infer<typeof PlanTask>;
 

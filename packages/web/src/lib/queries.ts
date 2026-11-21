@@ -7,7 +7,16 @@ import {
 } from '@tanstack/react-query';
 import { createContext, useContext, useEffect } from 'react';
 import type { ProjectSettings } from '@squadboard/core';
-import type { AgentPatch, Api, InstallTeam, NewTask, TaskView, TeamState } from '../api';
+import type {
+  AgentPatch,
+  Api,
+  InstallTeam,
+  NewTask,
+  PlanEdit,
+  PlanView,
+  TaskView,
+  TeamState,
+} from '../api';
 import { useRunStream } from './run-streams';
 
 export const ApiContext = createContext<Api | null>(null);
@@ -35,6 +44,7 @@ export const keys = {
   templates: ['templates'] as const,
   team: (projectId: string) => ['team', projectId] as const,
   checks: (projectId: string) => ['checks', projectId] as const,
+  plans: (projectId: string) => ['plans', projectId] as const,
 };
 
 export function useHealth() {
@@ -204,4 +214,71 @@ export function useLiveTask(task: TaskView) {
   }, [stream.finished, client, task.projectId]);
 
   return stream;
+}
+
+// ---------- plans ----------
+
+export function usePlans(projectId: string | null) {
+  const api = useApi();
+  return useQuery({
+    queryKey: keys.plans(projectId ?? ''),
+    queryFn: () => api.listPlans(projectId ?? ''),
+    enabled: projectId !== null,
+  });
+}
+
+function putPlan(client: Client, plan: PlanView) {
+  client.setQueryData<PlanView[]>(keys.plans(plan.projectId), (list) =>
+    list
+      ? list.some((p) => p.id === plan.id)
+        ? list.map((p) => (p.id === plan.id ? plan : p))
+        : [plan, ...list]
+      : [plan],
+  );
+}
+
+/** Plan actions; each returns the new plan, which goes straight into the cached list. */
+export function usePlanActions(projectId: string) {
+  const api = useApi();
+  const client = useQueryClient();
+  const after = {
+    onSuccess: (plan: PlanView) => putPlan(client, plan),
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: keys.plans(projectId) });
+      refreshAfterTaskChange(client, projectId);
+    },
+  };
+  return {
+    start: useMutation({ mutationFn: (text: string) => api.startPlan(projectId, text), ...after }),
+    edit: useMutation({
+      mutationFn: ({ id, edit }: { id: string; edit: PlanEdit }) => api.editPlan(id, edit),
+      ...after,
+    }),
+    approve: useMutation({
+      mutationFn: ({ id, answers }: { id: string; answers: Record<string, string> }) =>
+        api.approvePlan(id, answers),
+      ...after,
+    }),
+    cancel: useMutation({ mutationFn: (id: string) => api.cancelPlan(id), ...after }),
+    resume: useMutation({ mutationFn: (id: string) => api.resumePlan(id), ...after }),
+  };
+}
+
+/**
+ * One EventSource per open project: the server says "something changed" (the scheduler started a
+ * task, a plan step finished) and the board re-reads tasks and plans. No polling.
+ */
+export function useProjectEvents(projectId: string | null) {
+  const api = useApi();
+  const client = useQueryClient();
+  useEffect(() => {
+    if (!projectId || typeof EventSource === 'undefined') return;
+    const source = new EventSource(api.projectEventsUrl(projectId));
+    source.addEventListener('change', () => {
+      void client.invalidateQueries({ queryKey: keys.tasks(projectId) });
+      void client.invalidateQueries({ queryKey: keys.plans(projectId) });
+      void client.invalidateQueries({ queryKey: keys.runs });
+    });
+    return () => source.close();
+  }, [api, client, projectId]);
 }

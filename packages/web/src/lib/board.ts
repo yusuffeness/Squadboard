@@ -90,8 +90,11 @@ export interface StatusLook {
 }
 
 /** The status pill of a task (text always says it; colour only helps). */
-export function taskLook(task: Pick<TaskView, 'status' | 'active'>): StatusLook {
+export function taskLook(
+  task: Pick<TaskView, 'status' | 'active'> & { interrupted?: boolean },
+): StatusLook {
   if (task.active) return { tone: 'info', label: 'Çalışıyor' };
+  if (task.status === 'stopped' && task.interrupted) return { tone: 'warn', label: 'Kesildi' };
   const looks: Record<TaskStatus, StatusLook> = {
     planned: { tone: 'idle', label: 'Hazır' },
     blocked: { tone: 'idle', label: 'Bekliyor' },

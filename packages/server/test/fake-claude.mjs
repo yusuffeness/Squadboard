@@ -15,10 +15,19 @@
 //   FAKE_CLAUDE_PIDS_FILE  with HANG: write {"self": pid, "grandchild": pid} here
 //   FAKE_CLAUDE_WRITE      JSON {"relative/path": "content"}: files to write in the cwd, like
 //                          an agent's edits (written before the replay starts)
+//   FAKE_CLAUDE_WRITE_BY_PROMPT  JSON {"marker": {"path": "content"}}: like FAKE_CLAUDE_WRITE,
+//                          only for runs whose -p prompt contains the marker
+//   FAKE_CLAUDE_FAIL_BY_PROMPT   JSON ["marker"]: runs whose prompt contains a marker replay the
+//                          error_max_turns recording instead (the task fails)
+//   FAKE_CLAUDE_PLANS      path of a JSON array; a run with --json-schema replays the recorded
+//                          structured-output run (17) with element n as structured_output on its
+//                          n-th call (the last one repeats; null = no structured_output at all)
+//   FAKE_CLAUDE_CALLS_FILE append one JSON line per call: {argv, cwd, startedAt, endedAt}
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const argv = process.argv.slice(2);
 const flag = (name) => {
@@ -65,7 +74,27 @@ if (resumeId) {
   writeFileSync(join(sessionsDir, sessionId), '');
 }
 
-const fixture = env.FAKE_CLAUDE_FIXTURE;
+const RECORDINGS = fileURLToPath(new URL('../../core/test/fixtures/claude-cli/', import.meta.url));
+const prompt = flag('-p') ?? '';
+const startedAt = Date.now();
+const markerHit = (json) =>
+  Object.entries(JSON.parse(json ?? '{}')).filter(([marker]) => prompt.includes(marker));
+
+let fixture = env.FAKE_CLAUDE_FIXTURE;
+let structured; // undefined = keep the recording as it is
+if (argv.includes('--json-schema') && env.FAKE_CLAUDE_PLANS) {
+  const plans = JSON.parse(readFileSync(env.FAKE_CLAUDE_PLANS, 'utf8'));
+  const counter = join(env.FAKE_CLAUDE_HOME ?? '.fake-claude', 'plan-calls');
+  mkdirSync(dirname(counter), { recursive: true });
+  const n = existsSync(counter) ? Number(readFileSync(counter, 'utf8')) : 0;
+  writeFileSync(counter, String(n + 1));
+  structured = plans[Math.min(n, plans.length - 1)];
+  fixture = join(RECORDINGS, '17-json-schema-stream.jsonl');
+} else if (
+  JSON.parse(env.FAKE_CLAUDE_FAIL_BY_PROMPT ?? '[]').some((marker) => prompt.includes(marker))
+) {
+  fixture = join(RECORDINGS, '15-max-turns.jsonl');
+}
 if (!fixture) {
   process.stderr.write('fake-claude: FAKE_CLAUDE_FIXTURE is not set\n');
   process.exit(2);
@@ -73,14 +102,23 @@ if (!fixture) {
 const lines = readFileSync(fixture, 'utf8')
   .split(/\r?\n/)
   .filter((l) => l.trim() !== '')
-  .map((l) => l.replace(/"session_id":"[0-9a-f-]{36}"/g, `"session_id":"${sessionId}"`));
+  .map((l) => l.replace(/"session_id":"[0-9a-f-]{36}"/g, `"session_id":"${sessionId}"`))
+  .map((l) => {
+    if (structured === undefined || !l.includes('"type":"result"')) return l;
+    const result = JSON.parse(l);
+    if (structured === null) delete result.structured_output;
+    else result.structured_output = structured;
+    return JSON.stringify(result);
+  });
 
-if (env.FAKE_CLAUDE_WRITE) {
-  for (const [file, content] of Object.entries(JSON.parse(env.FAKE_CLAUDE_WRITE))) {
-    const target = join(process.cwd(), file);
-    mkdirSync(dirname(target), { recursive: true });
-    writeFileSync(target, content);
-  }
+const writes = {
+  ...JSON.parse(env.FAKE_CLAUDE_WRITE ?? '{}'),
+  ...Object.assign({}, ...markerHit(env.FAKE_CLAUDE_WRITE_BY_PROMPT).map(([, files]) => files)),
+};
+for (const [file, content] of Object.entries(writes)) {
+  const target = join(process.cwd(), file);
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, content);
 }
 
 const delay = Number(env.FAKE_CLAUDE_DELAY_MS ?? 2);
@@ -106,5 +144,11 @@ if (env.FAKE_CLAUDE_HANG === '1') {
   }
   setInterval(() => {}, 1000);
 } else {
+  if (env.FAKE_CLAUDE_CALLS_FILE) {
+    appendFileSync(
+      env.FAKE_CLAUDE_CALLS_FILE,
+      JSON.stringify({ argv, cwd: process.cwd(), startedAt, endedAt: Date.now() }) + '\n',
+    );
+  }
   process.exit(isError ? 1 : 0);
 }

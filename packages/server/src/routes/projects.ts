@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { Db } from '../db/index.js';
 import {
   getProject,
+  getRequest,
   getTaskWithContext,
   latestRunSummary,
   listProjectTasks,
@@ -13,7 +14,7 @@ import {
 } from '../db/repository.js';
 import { explainGitError } from '../git/errors.js';
 import { getRepoInfo, isClean } from '../git/git.js';
-import type { Runner } from '../runner/runner.js';
+import { INTERRUPTED_ERROR, type Runner } from '../runner/runner.js';
 import { ServiceError, type TaskService } from '../tasks/task-service.js';
 import type { RunView } from './runs.js';
 
@@ -43,6 +44,13 @@ export interface TaskView {
   gitError: string | null;
   /** git's own message behind gitError (shown under "Ayrıntı"). */
   gitErrorDetail: string | null;
+  /** Why a ready task was not started (e.g. its dependencies' branches conflict). */
+  blockedReason: string | null;
+  /** Stopped because Squadboard shut down, not by the user ("Kesildi"). */
+  interrupted: boolean;
+  /** The plan this task came from; null for a hand-made task. */
+  planId: string | null;
+  stage: number;
   createdAt: string;
   active: boolean;
   latestRun: RunView | null;
@@ -85,6 +93,10 @@ export function registerProjectRoutes(
       unexpectedFiles: task.unexpectedFiles,
       gitError: task.gitError ? (explainGitError(task.gitError)?.message ?? task.gitError) : null,
       gitErrorDetail: task.gitError,
+      blockedReason: task.blockedReason,
+      interrupted: task.status === 'stopped' && run?.error === INTERRUPTED_ERROR,
+      planId: getRequest(db, task.requestId)?.status ? task.requestId : null,
+      stage: task.stage,
       createdAt: task.createdAt,
       active: runner.isTaskRunning(task.id),
       latestRun: run ? { ...run, active: runner.isRunning(run.id) } : null,

@@ -3,6 +3,9 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { existsSync } from 'node:fs';
 import { ZodError } from 'zod';
 import type { Db } from './db/index.js';
+import { PlanService } from './plans/plan-service.js';
+import { Scheduler } from './plans/scheduler.js';
+import { registerPlanRoutes } from './routes/plans.js';
 import { registerProjectRoutes } from './routes/projects.js';
 import { registerRunRoutes } from './routes/runs.js';
 import { registerTeamRoutes } from './routes/team.js';
@@ -18,6 +21,9 @@ export interface AppOptions extends SecurityOptions {
   db: Db;
   runner: Runner;
   tasks: TaskService;
+  /** Created here when not given (tests); the server passes its own to stop them on shutdown. */
+  scheduler?: Scheduler;
+  plans?: PlanService;
   /** Built web UI (packages/web/dist). Served at `/` when it exists. */
   webDir?: string;
   logger?: boolean;
@@ -65,6 +71,10 @@ export function buildApp(options: AppOptions): FastifyInstance {
   app.get('/health', async (): Promise<HealthResponse> => ({ status: 'ok' }));
   registerRunRoutes(app, { db: options.db, runner: options.runner });
   registerProjectRoutes(app, { db: options.db, runner: options.runner, tasks: options.tasks });
+  const scheduler = options.scheduler ?? new Scheduler(options.db, options.runner, options.tasks);
+  const plans =
+    options.plans ?? new PlanService(options.db, options.runner, options.tasks, scheduler);
+  registerPlanRoutes(app, { db: options.db, plans, hub: options.tasks.hub });
   registerTeamRoutes(app, {
     db: options.db,
     runner: options.runner,
