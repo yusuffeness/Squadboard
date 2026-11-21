@@ -1,5 +1,9 @@
 import {
   AGENTS_DIR,
+  ASK_USER_QUESTION,
+  buildAllowedTools,
+  defaultAllowRules,
+  type PackageManager,
   TEAM_FILE,
   TeamFile,
   describeZodError,
@@ -60,6 +64,11 @@ export interface TeamView {
   description: string | null;
   settings: ProjectSettings;
   agents: AgentView[];
+  /**
+   * Allow rules for every run in this project (`--allowedTools`). From `.team/team.json`
+   * (`permissions.allow`), or, when the file has none, derived from the project's scripts.
+   */
+  permissions: { allow: string[]; fromFile: boolean };
 }
 
 export type TeamState =
@@ -163,14 +172,53 @@ function loadTeam(root: string): LoadedTeam | null {
   return { raw, team: parsed.value, agents };
 }
 
-function view(loaded: LoadedTeam): TeamView {
+function view(loaded: LoadedTeam, root: string): TeamView {
+  const allow = loaded.team.permissions?.allow;
   return {
     id: loaded.team.id,
     name: loaded.team.name,
     description: loaded.team.description ?? null,
     settings: loaded.team.settings,
     agents: loaded.agents,
+    permissions: allow
+      ? { allow, fromFile: true }
+      : { allow: detectAllowRules(root), fromFile: false },
   };
+}
+
+/** Lock file → package manager; npm when there is none. */
+function packageManagerOf(root: string): PackageManager {
+  if (existsSync(join(root, 'pnpm-lock.yaml'))) return 'pnpm';
+  if (existsSync(join(root, 'yarn.lock'))) return 'yarn';
+  if (existsSync(join(root, 'bun.lockb')) || existsSync(join(root, 'bun.lock'))) return 'bun';
+  return 'npm';
+}
+
+/**
+ * The project's default allowlist: its test, lint and typecheck scripts (package.json) for its
+ * package manager. Empty for projects without package.json; the user can still allow a command
+ * from the permission card.
+ */
+export function detectAllowRules(root: string): string[] {
+  const text = readText(join(root, 'package.json'));
+  if (text === null) return [];
+  let scripts: string[] = [];
+  try {
+    const pkg = JSON.parse(text) as { scripts?: unknown };
+    if (typeof pkg.scripts === 'object' && pkg.scripts !== null) scripts = Object.keys(pkg.scripts);
+  } catch {
+    return [];
+  }
+  return defaultAllowRules({ scripts, packageManager: packageManagerOf(root) });
+}
+
+/**
+ * Agents that can change files get AskUserQuestion: asking is how they reach the user (the
+ * call is denied headless and lands in permission_denials). Read-only agents stay read-only.
+ */
+function withQuestionTool(tools: readonly string[]): string[] {
+  if (isReadOnly([...tools]) || tools.includes(ASK_USER_QUESTION)) return [...tools];
+  return [...tools, ASK_USER_QUESTION];
 }
 
 export class TeamService {
@@ -187,7 +235,7 @@ export class TeamService {
         if (!loaded) return [];
         return [
           {
-            ...view(loaded),
+            ...view(loaded, join(this.templatesDir, e.name)),
             files: [TEAM_FILE, ...loaded.team.agents.map((a) => `${AGENTS_DIR}/${a.file}`)],
           },
         ];
@@ -199,7 +247,7 @@ export class TeamService {
   read(projectPath: string): TeamState {
     try {
       const loaded = loadTeam(projectPath);
-      return loaded ? { status: 'ok', team: view(loaded) } : { status: 'missing' };
+      return loaded ? { status: 'ok', team: view(loaded, projectPath) } : { status: 'missing' };
     } catch (err) {
       return { status: 'invalid', error: (err as Error).message };
     }
@@ -230,6 +278,8 @@ export class TeamService {
     const rawAgents = raw.agents as Record<string, unknown>[];
     for (const agent of rawAgents) agent.enabled = enabled.includes(String(agent.id));
     raw.settings = { ...template.team.settings, ...input.settings };
+    // The project's test/lint/typecheck commands, written out so the user sees and edits them.
+    if (raw.permissions === undefined) raw.permissions = { allow: detectAllowRules(projectPath) };
     const checked = TeamFile.safeParse(raw);
     if (!checked.success) {
       throw new ServiceError(400, `Ayarlar geçersiz: ${describeZodError(checked.error)}`);
@@ -310,25 +360,50 @@ export class TeamService {
     return this.mustView(projectPath);
   }
 
-  /** How to run `agentId` in this project: from its definition, or `none` (use the default). */
-  runConfig(projectPath: string, agentId: string): AgentRunConfig {
+  /**
+   * How to run `agentId` in this project: from its definition, or `none` (use the default).
+   * `extraRules` are the task's own grants (permission card "İzin ver" / "Bir kez").
+   */
+  runConfig(
+    projectPath: string,
+    agentId: string,
+    extraRules: readonly string[] = [],
+  ): AgentRunConfig {
     const state = this.read(projectPath);
     if (state.status !== 'ok') return { status: 'none' };
     const agent = state.team.agents.find((a) => a.id === agentId);
     if (!agent) return { status: 'none' };
     if (!agent.enabled) return { status: 'disabled', agent };
-    const tools = agent.tools ?? DEFAULT_TOOLS;
+    const tools = withQuestionTool(agent.tools ?? DEFAULT_TOOLS);
     const options: AgentRunOptions = {
       permissionMode: agent.permissionMode ?? 'acceptEdits',
       // --tools is what really limits the agent (a read-only Reviewer gets only read tools).
       tools,
-      // Auto-approve them, except Bash: a bare "Bash" would approve every shell command.
-      allowedTools: tools.filter((t) => t !== 'Bash'),
+      // Its tools are auto-approved except Bash (a bare "Bash" would approve every shell command)
+      // and AskUserQuestion (it must be denied to reach us); shell commands only by rule.
+      allowedTools: buildAllowedTools(tools, [...state.team.permissions.allow, ...extraRules]),
       maxBudgetUsd: agent.budgetUsd,
       systemPrompt: agent.prompt,
     };
     if (agent.model) options.model = agent.model;
     return { status: 'ok', options, agent };
+  }
+
+  /**
+   * "Hep izin ver": adds a rule to the project's `.team/team.json` (`permissions.allow`). When the
+   * file has no list yet, the derived default list is written along with it, so nothing that was
+   * allowed before stops being allowed.
+   */
+  addAllowRule(projectPath: string, rule: string): TeamView {
+    const loaded = this.mustLoad(projectPath);
+    const raw = structuredClone(loaded.raw);
+    const current = loaded.team.permissions?.allow ?? detectAllowRules(projectPath);
+    raw.permissions = {
+      ...(typeof raw.permissions === 'object' ? raw.permissions : {}),
+      allow: current.includes(rule) ? current : [...current, rule],
+    };
+    this.writeTeamJson(projectPath, raw);
+    return this.mustView(projectPath);
   }
 
   // ---------- internals ----------
@@ -345,7 +420,7 @@ export class TeamService {
   }
 
   private mustView(projectPath: string): TeamView {
-    return view(this.mustLoad(projectPath));
+    return view(this.mustLoad(projectPath), projectPath);
   }
 
   private writeTeamJson(projectPath: string, raw: Record<string, unknown>): void {

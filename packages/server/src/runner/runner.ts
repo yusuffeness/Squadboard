@@ -2,7 +2,8 @@ import {
   assertTransition,
   classifyCliStderr,
   createClaudeStreamAdapter,
-  parseKarar,
+  extractAgentQuestions,
+  permissionRequestsFrom,
   type AgentEvent,
   type AgentEventOf,
   type RunStatus,
@@ -19,6 +20,7 @@ import {
   finishRun,
   getTask,
   insertDecision,
+  insertPermissionRequest,
   insertRun,
   latestResumableRun,
   setTaskStatus,
@@ -143,8 +145,9 @@ interface ActiveRun {
  *
  * Task status: running while the process runs, then
  * - in_review when the agent finished,
- * - waiting_decision when it ended with a KARAR block or tools were denied
- *   (a denied tool does not stop the CLI, so `permission_denials` is checked here),
+ * - waiting_decision when the agent asked something (AskUserQuestion or a KARAR block, also an
+ *   unreadable one) or tools were denied (a denied tool does not stop the CLI, so
+ *   `permission_denials` is checked here),
  * - failed on CLI errors, stopped when stop() was called.
  */
 export class Runner extends EventEmitter<RunnerEventMap> {
@@ -324,6 +327,57 @@ export class Runner extends EventEmitter<RunnerEventMap> {
     }
   }
 
+  /**
+   * Stores what the agent wants from the user at the end of a successful run: its questions
+   * (denied AskUserQuestion calls, else a KARAR block) and the tool calls the CLI denied. A
+   * question that cannot be read is stored too, marked as a problem, so the task never ends
+   * silently. Returns true when the task has to wait for the user.
+   */
+  private recordQuestions(runId: string, taskId: string, result: AgentEventOf<'result'>): boolean {
+    const task = getTask(this.db, taskId);
+    if (!task) return false;
+    let waiting = false;
+    const found = extractAgentQuestions(result);
+    if (found.status === 'ok') {
+      for (const q of found.questions) {
+        insertDecision(this.db, {
+          requestId: task.requestId,
+          taskId,
+          runId,
+          source: 'agent',
+          question: q.question,
+          options: q.options,
+          multiSelect: q.multiSelect,
+        });
+      }
+      waiting = true;
+    } else if (found.status === 'invalid') {
+      // Show what the agent wrote: its final message, or the unreadable block itself.
+      const shown = (result.text ?? '').trim() || found.raw;
+      insertDecision(this.db, {
+        requestId: task.requestId,
+        taskId,
+        runId,
+        source: 'agent',
+        question: shown.slice(-4000),
+        options: [],
+        problem: found.reason,
+      });
+      waiting = true;
+    }
+    for (const request of permissionRequestsFrom(result.permissionDenials)) {
+      insertPermissionRequest(this.db, {
+        taskId,
+        runId,
+        tool: request.tool,
+        input: request.input,
+        rule: request.rule,
+      });
+      waiting = true;
+    }
+    return waiting;
+  }
+
   private launch(input: {
     taskId: string;
     cwd: string;
@@ -405,25 +459,8 @@ export class Runner extends EventEmitter<RunnerEventMap> {
         error = finalResult.errors.join('; ') || finalResult.subtype;
       } else {
         runStatus = 'succeeded';
-        const karar = parseKarar(finalResult.text ?? '');
-        if (karar.status === 'ok') {
-          const task = getTask(this.db, taskId);
-          for (const q of karar.questions) {
-            if (task) {
-              insertDecision(this.db, {
-                requestId: task.requestId,
-                taskId,
-                source: 'agent',
-                question: q.question,
-                options: q.options,
-              });
-            }
-          }
-        }
-        taskStatus =
-          karar.status === 'ok' || finalResult.permissionDenials.length > 0
-            ? 'waiting_decision'
-            : 'in_review';
+        const asked = this.recordQuestions(runId, taskId, finalResult);
+        taskStatus = asked ? 'waiting_decision' : 'in_review';
       }
     } else {
       // No result event: CLI error before/while running, or the process could not start.
