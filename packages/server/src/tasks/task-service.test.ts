@@ -336,12 +336,13 @@ describe('tasks in worktrees', () => {
 });
 
 describe('agent tool set', () => {
-  it('limits the available tools with --tools (no Bash, no AskUserQuestion), not only --allowedTools', () => {
+  it('limits the available tools with --tools (no Bash), not only --allowedTools', () => {
     const args = buildClaudeArgs('x', { sessionId: 's' }, DEFAULT_AGENT_OPTIONS);
     const value = (flag: string) => args[args.indexOf(flag) + 1];
-    expect(value('--tools')).toBe('Read,Edit,Write,Glob,Grep');
+    // AskUserQuestion is offered (that is how the agent asks) but never auto-approved.
+    expect(value('--tools')).toBe('Read,Edit,Write,Glob,Grep,AskUserQuestion');
     expect(value('--allowedTools')).toBe('Read,Edit,Write,Glob,Grep');
-    expect(args.join(' ')).not.toMatch(/Bash|AskUserQuestion/);
+    expect(args.join(' ')).not.toMatch(/Bash/);
   });
 });
 

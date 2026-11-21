@@ -23,6 +23,10 @@
 //                          structured-output run (17) with element n as structured_output on its
 //                          n-th call (the last one repeats; null = no structured_output at all)
 //   FAKE_CLAUDE_CALLS_FILE append one JSON line per call: {argv, cwd, startedAt, endedAt}
+//   FAKE_CLAUDE_SEQUENCE   JSON array of recording names (e.g. "22-ask-user-question.jsonl"):
+//                          the n-th task run replays element n (the last one repeats). Used for
+//                          ask → answer → resume chains
+//   FAKE_CLAUDE_RESULT_TEXT  replaces the final message text (`result`) of the recording
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -94,6 +98,13 @@ if (argv.includes('--json-schema') && env.FAKE_CLAUDE_PLANS) {
   JSON.parse(env.FAKE_CLAUDE_FAIL_BY_PROMPT ?? '[]').some((marker) => prompt.includes(marker))
 ) {
   fixture = join(RECORDINGS, '15-max-turns.jsonl');
+} else if (env.FAKE_CLAUDE_SEQUENCE) {
+  const sequence = JSON.parse(env.FAKE_CLAUDE_SEQUENCE);
+  const counter = join(env.FAKE_CLAUDE_HOME ?? '.fake-claude', 'sequence-calls');
+  mkdirSync(dirname(counter), { recursive: true });
+  const n = existsSync(counter) ? Number(readFileSync(counter, 'utf8')) : 0;
+  writeFileSync(counter, String(n + 1));
+  fixture = join(RECORDINGS, sequence[Math.min(n, sequence.length - 1)]);
 }
 if (!fixture) {
   process.stderr.write('fake-claude: FAKE_CLAUDE_FIXTURE is not set\n');
@@ -103,6 +114,10 @@ const lines = readFileSync(fixture, 'utf8')
   .split(/\r?\n/)
   .filter((l) => l.trim() !== '')
   .map((l) => l.replace(/"session_id":"[0-9a-f-]{36}"/g, `"session_id":"${sessionId}"`))
+  .map((l) => {
+    if (env.FAKE_CLAUDE_RESULT_TEXT === undefined || !l.includes('"type":"result"')) return l;
+    return JSON.stringify({ ...JSON.parse(l), result: env.FAKE_CLAUDE_RESULT_TEXT });
+  })
   .map((l) => {
     if (structured === undefined || !l.includes('"type":"result"')) return l;
     const result = JSON.parse(l);
