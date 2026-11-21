@@ -48,7 +48,12 @@ const BLOCK_RE = /```[ \t]*karar[ \t]*\r?\n([\s\S]*?)```/gi;
 export function parseKarar(text: string): KararParseResult {
   const matches = [...text.matchAll(BLOCK_RE)];
   const last = matches.at(-1);
-  if (!last) return { status: 'none' };
+  if (!last) {
+    // An opened but never closed block is a broken question, not "no question".
+    const open = /```[ \t]*karar\b/i.exec(text);
+    if (!open) return { status: 'none' };
+    return { status: 'invalid', reason: 'Block is not closed', raw: text.slice(open.index).trim() };
+  }
 
   const raw = (last[1] ?? '').trim();
   const atEnd = text.slice((last.index ?? 0) + last[0].length).trim() === '';

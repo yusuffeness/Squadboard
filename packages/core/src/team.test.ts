@@ -70,6 +70,23 @@ describe('parseTeamFile', () => {
       error: expect.stringMatching(/en az bir ajan/),
     });
   });
+
+  it('reads the allowlist and refuses bare Bash', () => {
+    const ok = parse({ ...team(), permissions: { allow: ['Bash(npm test:*)', 'Read'] } });
+    expect(ok).toMatchObject({
+      ok: true,
+      value: { permissions: { allow: ['Bash(npm test:*)', 'Read'] } },
+    });
+
+    expect(parse({ ...team(), permissions: { allow: ['Bash'] } })).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/permissions\.allow\[0\]: Çıplak "Bash"/),
+    });
+    expect(parse({ ...team(), permissions: { allow: ['npm test'] } })).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/Araç\(…\)/),
+    });
+  });
 });
 
 describe('agent files', () => {
