@@ -251,16 +251,118 @@ export function commitAll(repo: string, worktree: string, message: string): Prom
     await git(worktree, ['add', '--all']);
     if ((await git(worktree, ['diff', '--cached', '--quiet'], true)).ok) return null;
 
-    const hasEmail = (await git(worktree, ['config', 'user.email'], true)).stdout.trim() !== '';
-    const identity = hasEmail
-      ? []
-      : [
-          '-c',
-          `user.name=${FALLBACK_IDENTITY.name}`,
-          '-c',
-          `user.email=${FALLBACK_IDENTITY.email}`,
-        ];
+    const identity = await identityArgs(worktree);
     await git(worktree, [...identity, 'commit', '--quiet', '-m', message]);
     return (await git(worktree, ['rev-parse', 'HEAD'])).stdout.trim();
+  });
+}
+
+/** `-c user.name=… -c user.email=…` when the repo has no identity of its own. */
+async function identityArgs(worktree: string): Promise<string[]> {
+  const hasEmail = (await git(worktree, ['config', 'user.email'], true)).stdout.trim() !== '';
+  return hasEmail
+    ? []
+    : ['-c', `user.name=${FALLBACK_IDENTITY.name}`, '-c', `user.email=${FALLBACK_IDENTITY.email}`];
+}
+
+// ---------- base branch for a task with several dependencies ----------
+
+export class MergeConflictError extends Error {
+  constructor(
+    /** The branch that could not be merged into the others. */
+    readonly branch: string,
+    /** Files both sides changed (from git's unmerged list). */
+    readonly files: string[],
+    readonly gitOutput: string,
+  ) {
+    super(`Merging ${branch} conflicts in: ${files.join(', ') || '(unknown files)'}`);
+    this.name = 'MergeConflictError';
+  }
+}
+
+export interface MergedBaseOptions {
+  /** New branch under `team/` holding the merge, e.g. `team/test-1a2b-base`. */
+  branch: string;
+  /** Temporary worktree used for merging; removed again before returning. */
+  path: string;
+  /** Branches to combine (the dependencies' branches), in order. At least two. */
+  sources: string[];
+}
+
+/**
+ * Creates `branch` from the first source and merges the others into it (one merge commit each),
+ * in a temporary worktree outside the user's repo. The user's checkout and main branch are not
+ * touched. If the branch already exists (made for an earlier start) it is reused as is.
+ *
+ * On a conflict the merge is aborted, the temporary worktree and branch are removed and a
+ * MergeConflictError names the branch and files.
+ */
+export function createMergedBase(
+  repo: string,
+  options: MergedBaseOptions,
+): Promise<{ branch: string; commit: string }> {
+  return withRepoLock(repo, async () => {
+    const { branch, path, sources } = options;
+    if (!branch.startsWith(BRANCH_PREFIX)) {
+      throw new Error(`Squadboard only creates branches under ${BRANCH_PREFIX}: ${branch}`);
+    }
+    const [first, ...rest] = sources;
+    if (!first || rest.length === 0)
+      throw new Error('createMergedBase needs at least two branches');
+    if (await branchExists(repo, branch)) {
+      return { branch, commit: await resolveCommit(repo, branch) };
+    }
+
+    mkdirSync(dirname(path), { recursive: true });
+    await git(repo, ['worktree', 'add', '-b', branch, path, await resolveCommit(repo, first)]);
+    const cleanup = async (deleteBranch: boolean) => {
+      await git(repo, ['worktree', 'remove', '--force', path], true);
+      await git(repo, ['worktree', 'prune'], true);
+      if (deleteBranch) await git(repo, ['branch', '-D', branch], true);
+    };
+
+    try {
+      const identity = await identityArgs(path);
+      for (const source of rest) {
+        const merge = await git(
+          path,
+          [
+            ...identity,
+            'merge',
+            '--no-ff',
+            '--no-edit',
+            '-m',
+            `squadboard: merge ${source}`,
+            source,
+          ],
+          true,
+        );
+        if (!merge.ok) {
+          const unmerged = await git(path, ['diff', '--name-only', '--diff-filter=U', '-z'], true);
+          await git(path, ['merge', '--abort'], true);
+          throw new MergeConflictError(
+            source,
+            splitNul(unmerged.stdout).sort(),
+            [merge.stdout, merge.stderr].join('\n').trim(),
+          );
+        }
+      }
+      const commit = (await git(path, ['rev-parse', 'HEAD'])).stdout.trim();
+      await cleanup(false);
+      return { branch, commit };
+    } catch (err) {
+      await cleanup(true);
+      throw err;
+    }
+  });
+}
+
+/** Deletes a `team/` branch if it exists (e.g. a merged base nobody needs any more). */
+export function deleteTeamBranch(repo: string, branch: string): Promise<void> {
+  return withRepoLock(repo, async () => {
+    if (!branch.startsWith(BRANCH_PREFIX)) {
+      throw new Error(`Refusing to delete a branch outside ${BRANCH_PREFIX}: ${branch}`);
+    }
+    if (await branchExists(repo, branch)) await git(repo, ['branch', '-D', branch]);
   });
 }

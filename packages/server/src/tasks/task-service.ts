@@ -1,4 +1,5 @@
 import { canTransition, patternsOverlap, type TaskStatus } from '@squadboard/core';
+import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
@@ -10,6 +11,7 @@ import {
   deleteProject,
   findProjectByPath,
   getProject,
+  getTask,
   getTaskWithContext,
   listDependents,
   listProjectTasks,
@@ -20,10 +22,14 @@ import {
   type TaskRow,
 } from '../db/repository.js';
 import { explainGitError } from '../git/errors.js';
+import { ChangeHub } from '../events/change-hub.js';
 import {
+  MergeConflictError,
   changedFiles,
   commitAll,
+  createMergedBase,
   createWorktree,
+  deleteTeamBranch,
   detectMainBranch,
   getRepoInfo,
   removeWorktree,
@@ -59,7 +65,21 @@ export const DEFAULT_AGENT_OPTIONS: AgentRunOptions = {
 };
 
 /** A dependency must be finished (and its work committed) before a dependent task starts. */
-const READY_DEPENDENCY: readonly TaskStatus[] = ['in_review', 'done'];
+export const READY_DEPENDENCY: readonly TaskStatus[] = ['in_review', 'done'];
+
+/** Suffix of the branch that merges a task's dependencies (`team/<task-branch>-base`). */
+export const BASE_BRANCH_SUFFIX = '-base';
+
+/** One task of an approved plan; `key` and `dependsOn` are the plan's own short ids. */
+export interface PlannedTaskInput {
+  key: string;
+  title: string;
+  prompt: string;
+  agent: string;
+  dependsOn: string[];
+  expectedFiles: string[];
+  stage: number;
+}
 
 export interface CreateTaskInput {
   title: string;
@@ -77,7 +97,16 @@ export interface TaskServiceOptions {
   /** Used when the task's agent has no definition in the project's `.team/`. */
   agentOptions?: AgentRunOptions;
   team?: TeamService;
+  /** Change signals for the board's live updates. */
+  hub?: ChangeHub;
 }
+
+/** Called after a run ended and its post-run work (commit, changed files) is done. */
+export type TaskSettledListener = (event: {
+  taskId: string;
+  projectId: string;
+  outcome: RunOutcome;
+}) => void;
 
 /**
  * Projects (git repositories) and tasks that each run in their own git worktree on a
@@ -89,7 +118,9 @@ export class TaskService {
   readonly worktreesDir: string;
   private readonly agentOptions: AgentRunOptions;
   readonly team: TeamService;
+  readonly hub: ChangeHub;
   private readonly pending = new Set<Promise<unknown>>();
+  private readonly settledListeners = new Set<TaskSettledListener>();
 
   constructor(options: TaskServiceOptions) {
     this.db = options.db;
@@ -97,6 +128,13 @@ export class TaskService {
     this.worktreesDir = canonicalDir(options.worktreesDir ?? defaultWorktreesDir());
     this.agentOptions = options.agentOptions ?? DEFAULT_AGENT_OPTIONS;
     this.team = options.team ?? new TeamService();
+    this.hub = options.hub ?? new ChangeHub();
+  }
+
+  /** The scheduler listens here to start the next tasks. Returns an unsubscribe function. */
+  onTaskSettled(listener: TaskSettledListener): () => void {
+    this.settledListeners.add(listener);
+    return () => this.settledListeners.delete(listener);
   }
 
   // ---------- projects ----------
@@ -173,7 +211,7 @@ export class TaskService {
     }
 
     const request = createRequest(this.db, { projectId, text: prompt });
-    return createTask(this.db, {
+    const created = createTask(this.db, {
       requestId: request.id,
       title,
       agent: input.agent.trim() || 'general',
@@ -181,6 +219,37 @@ export class TaskService {
       expectedFiles: (input.expectedFiles ?? []).map((f) => f.trim()).filter(Boolean),
       status,
     });
+    this.hub.notify(projectId);
+    return created;
+  }
+
+  /**
+   * Turns an approved plan into tasks of `requestId` (one transaction). Plan ids are only unique
+   * inside a request, so every task gets a new id and dependencies are mapped to those ids.
+   * Tasks with dependencies start `blocked`.
+   */
+  createPlannedTasks(requestId: string, planned: readonly PlannedTaskInput[]): TaskRow[] {
+    const ids = new Map(planned.map((p) => [p.key, randomUUID()]));
+    return this.db.transaction(() =>
+      planned.map((p) => {
+        const dependsOn = p.dependsOn.map((key) => {
+          const id = ids.get(key);
+          if (!id) throw new Error(`Unknown plan task ${key}`);
+          return id;
+        });
+        return createTask(this.db, {
+          id: ids.get(p.key) ?? randomUUID(),
+          requestId,
+          title: p.title,
+          prompt: p.prompt,
+          agent: p.agent,
+          dependsOn,
+          expectedFiles: p.expectedFiles,
+          stage: p.stage,
+          status: dependsOn.length > 0 ? 'blocked' : 'planned',
+        });
+      }),
+    );
   }
 
   /**
@@ -202,8 +271,8 @@ export class TaskService {
         `${agentConfig.agent.names.tech} ekipte kapalı. Ekip sayfasından açıp tekrar dene.`,
       );
     }
-    const dep = this.readyDependency(task);
-    // readyDependency may have moved the task from blocked to planned.
+    const deps = this.readyDependencies(task);
+    // readyDependencies may have moved the task from blocked to planned.
     task = getTaskWithContext(this.db, taskId)?.task ?? task;
     if (!canTransition(task.status, 'running')) {
       throw new ServiceError(409, `A ${task.status} task cannot be started`);
@@ -212,14 +281,16 @@ export class TaskService {
     // Only a worktree we created counts. Tasks from the Stage 4 prototype stored the user's own
     // folder here; running there again would edit the user's working tree.
     if (!this.isManagedWorktree(task.worktreePath) || !existsSync(task.worktreePath)) {
-      task = await this.ensureWorktree(project, task, dep);
+      task = await this.ensureWorktree(project, task, deps);
     }
     const cwd = task.worktreePath;
     if (!cwd || !this.isManagedWorktree(cwd)) throw new ServiceError(409, 'Task has no worktree');
 
     const options = agentConfig.status === 'ok' ? agentConfig.options : this.agentOptions;
+    if (task.blockedReason) updateTask(this.db, taskId, { blockedReason: null });
     const handle = this.runner.start({ taskId, prompt: ctx.prompt, cwd, ...options });
-    const done = handle.done.then((outcome) => this.afterRun(outcome));
+    this.hub.notify(project.id);
+    const done = handle.done.then((outcome) => this.afterRun(outcome, project.id));
     this.pending.add(done);
     void done.finally(() => this.pending.delete(done));
     return { ...handle, done };
@@ -270,6 +341,15 @@ export class TaskService {
       if (options.deleteBranch) removeOptions.deleteBranch = true;
       await removeWorktree(project.path, removeOptions);
     }
+    // The merged base of a task with several dependencies goes with its branch.
+    if (
+      options.deleteBranch &&
+      task.branch &&
+      task.baseRef === `${task.branch}${BASE_BRANCH_SUFFIX}`
+    ) {
+      await deleteTeamBranch(project.path, task.baseRef);
+    }
+    this.hub.notify(project.id);
     return updateTask(this.db, taskId, {
       worktreePath: null,
       ...(options.deleteBranch ? { branch: null, baseRef: null, baseCommit: null } : {}),
@@ -288,38 +368,81 @@ export class TaskService {
     );
   }
 
-  /** The dependency a task starts from (stacked), or null. Throws 409 if it is not finished. */
-  private readyDependency(task: TaskRow): TaskRow | null {
-    const depId = task.dependsOn[0];
-    if (!depId) return null;
-    const dep = getTaskWithContext(this.db, depId)?.task;
-    if (!dep) throw new ServiceError(409, 'Dependency no longer exists');
-    if (!READY_DEPENDENCY.includes(dep.status) || !dep.branch) {
-      throw new ServiceError(409, `Waiting for "${dep.title}" to finish first`);
-    }
+  /** The dependencies a task starts from (their work stacked), in order. 409 if one is not finished. */
+  private readyDependencies(task: TaskRow): TaskRow[] {
+    const deps = task.dependsOn.map((depId) => {
+      const dep = getTaskWithContext(this.db, depId)?.task;
+      if (!dep) throw new ServiceError(409, 'Dependency no longer exists');
+      if (!READY_DEPENDENCY.includes(dep.status) || !dep.branch) {
+        throw new ServiceError(409, `Waiting for "${dep.title}" to finish first`);
+      }
+      return dep;
+    });
     if (task.status === 'blocked') setTaskStatus(this.db, task.id, 'planned');
-    return dep;
+    return deps;
+  }
+
+  /**
+   * Where the task's branch starts: the main branch (detected fresh), the one dependency's
+   * branch, or, with several dependencies, a `team/<branch>-base` branch merging all of theirs.
+   * A merge conflict blocks the task and says which work collided; nothing is started.
+   */
+  private async startingPoint(
+    project: ProjectRow,
+    task: TaskRow,
+    branch: string,
+    deps: readonly TaskRow[],
+  ): Promise<string> {
+    if (task.baseRef) return task.baseRef;
+    const [only] = deps;
+    if (deps.length === 1 && only?.branch) return only.branch;
+    if (deps.length > 1) {
+      const baseBranch = `${branch}${BASE_BRANCH_SUFFIX}`;
+      try {
+        await createMergedBase(project.path, {
+          branch: baseBranch,
+          path: join(this.worktreesDir, project.id, `_merge-${worktreeFolderName(branch)}`),
+          sources: deps.map((d) => d.branch ?? ''),
+        });
+        return baseBranch;
+      } catch (err) {
+        if (!(err instanceof MergeConflictError)) throw err;
+        const failing = deps.find((d) => d.branch === err.branch);
+        const others = deps
+          .filter((d) => d !== failing)
+          .map((d) => `“${d.title}”`)
+          .join(', ');
+        const files = err.files.length ? ` (${err.files.slice(0, 5).join(', ')})` : '';
+        const reason =
+          `Önceki işlerin dalları birleştirilemedi: “${failing?.title ?? err.branch}” ile ${others} aynı yerleri değiştirmiş${files}. ` +
+          'Bu iş başlatılmadı; çakışan işlerden birini düzeltip yeniden başlat.';
+        if (getTask(this.db, task.id)?.status === 'planned') {
+          setTaskStatus(this.db, task.id, 'blocked');
+        }
+        updateTask(this.db, task.id, { blockedReason: reason });
+        this.hub.notify(project.id);
+        throw new ServiceError(409, reason, { detail: err.gitOutput });
+      }
+    }
+    const main = await detectMainBranch(project.path, project.mainBranch);
+    if (!main) {
+      throw new ServiceError(
+        409,
+        "Depoda henüz commit yok. Görev başlatmadan önce ilk commit'i at.",
+      );
+    }
+    if (main !== project.mainBranch) updateProject(this.db, project.id, { mainBranch: main });
+    return main;
   }
 
   private async ensureWorktree(
     project: ProjectRow,
     task: TaskRow,
-    dep: TaskRow | null,
+    deps: readonly TaskRow[],
   ): Promise<TaskRow> {
     const branch = task.branch ?? taskBranchName(task.title, task.id);
     const path = join(this.worktreesDir, project.id, worktreeFolderName(branch));
-    let base = task.baseRef ?? dep?.branch ?? null;
-    if (!base) {
-      const main = await detectMainBranch(project.path, project.mainBranch);
-      if (!main) {
-        throw new ServiceError(
-          409,
-          "Depoda henüz commit yok. Görev başlatmadan önce ilk commit'i at.",
-        );
-      }
-      if (main !== project.mainBranch) updateProject(this.db, project.id, { mainBranch: main });
-      base = main;
-    }
+    const base = await this.startingPoint(project, task, branch, deps);
     try {
       const wt = await createWorktree(project.path, { branch, path, base });
       return updateTask(this.db, task.id, {
@@ -346,12 +469,25 @@ export class TaskService {
    * it), record which files changed and which were not expected, and unblock dependents.
    * Never throws; git problems are stored on the task.
    */
-  private async afterRun(outcome: RunOutcome): Promise<RunOutcome> {
+  private async afterRun(outcome: RunOutcome, projectId: string): Promise<RunOutcome> {
+    await this.recordRunResult(outcome);
+    this.hub.notify(projectId);
+    for (const listener of this.settledListeners) {
+      try {
+        listener({ taskId: outcome.taskId, projectId, outcome });
+      } catch {
+        // A listener must not break the run's own bookkeeping.
+      }
+    }
+    return outcome;
+  }
+
+  private async recordRunResult(outcome: RunOutcome): Promise<void> {
     const ctx = getTaskWithContext(this.db, outcome.taskId);
     const task = ctx?.task;
     const project = ctx ? getProject(this.db, ctx.projectId) : undefined;
     if (!task || !project || !task.baseCommit || !this.isManagedWorktree(task.worktreePath)) {
-      return outcome;
+      return;
     }
     try {
       if (outcome.taskStatus === 'in_review') {
@@ -371,12 +507,17 @@ export class TaskService {
     } catch (err) {
       updateTask(this.db, task.id, { gitError: (err as Error).message });
     }
-    return outcome;
   }
 
+  /** A dependent becomes `planned` once ALL its dependencies are finished (not after the first). */
   private unblockDependents(projectId: string, taskId: string): void {
     for (const dependent of listDependents(this.db, projectId, taskId)) {
-      if (dependent.status === 'blocked') setTaskStatus(this.db, dependent.id, 'planned');
+      if (dependent.status !== 'blocked' || dependent.blockedReason) continue;
+      const allReady = dependent.dependsOn.every((id) => {
+        const dep = getTask(this.db, id);
+        return dep !== undefined && READY_DEPENDENCY.includes(dep.status);
+      });
+      if (allReady) setTaskStatus(this.db, dependent.id, 'planned');
     }
   }
 }

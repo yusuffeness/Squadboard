@@ -85,6 +85,26 @@ export interface RunOutcome {
   error: string | null;
 }
 
+/** A `claude -p` call that is not a task run (the Planner): not stored in `runs`. */
+export interface OneShotInput extends AgentRunOptions {
+  prompt: string;
+  cwd: string;
+  /** Every parsed event, as it arrives. */
+  onEvent?: (event: AgentEvent) => void;
+}
+
+export interface OneShotResult {
+  status: Exclude<RunStatus, 'running'>;
+  result: AgentEventOf<'result'> | null;
+  /** CLI error (stderr classified, or the result's errors). */
+  error: string | null;
+}
+
+export interface OneShotHandle {
+  done: Promise<OneShotResult>;
+  stop(): Promise<void>;
+}
+
 export interface RunHandle {
   runId: string;
   sessionId: string;
@@ -97,11 +117,23 @@ export interface RunnerEventMap {
   end: [RunOutcome];
 }
 
+interface StopState {
+  stopRequested: boolean;
+  /** Stored as the run's error, e.g. INTERRUPTED_ERROR when Squadboard shuts down. */
+  reason: string | null;
+}
+
+/**
+ * Run error of work cut off because Squadboard stopped (shutdown, or found still "running" at
+ * the next start). The UI shows such tasks as "Kesildi" instead of "Durduruldu".
+ */
+export const INTERRUPTED_ERROR = 'Squadboard kapandığı için iş yarıda kesildi.';
+
 interface ActiveRun {
   taskId: string;
   pid: number | undefined;
   /** Shared with supervise(), which reads it when the process closes. */
-  state: { stopRequested: boolean };
+  state: StopState;
   done: Promise<RunOutcome>;
 }
 
@@ -121,6 +153,8 @@ export class Runner extends EventEmitter<RunnerEventMap> {
   private readonly env: NodeJS.ProcessEnv;
   private readonly stopGraceMs: number;
   private readonly active = new Map<string, ActiveRun>();
+  /** Stop functions of running one-shot calls. */
+  private readonly oneShots = new Set<() => Promise<void>>();
 
   constructor(options: RunnerOptions) {
     super();
@@ -185,10 +219,11 @@ export class Runner extends EventEmitter<RunnerEventMap> {
   }
 
   /** Kills the run's whole process tree; the run and task become `stopped`. */
-  async stop(runId: string): Promise<RunOutcome | undefined> {
+  async stop(runId: string, reason: string | null = null): Promise<RunOutcome | undefined> {
     const run = this.active.get(runId);
     if (!run) return undefined;
     run.state.stopRequested = true;
+    run.state.reason = reason;
     if (run.pid !== undefined) await killProcessTree(run.pid, this.stopGraceMs);
     return run.done;
   }
@@ -198,9 +233,75 @@ export class Runner extends EventEmitter<RunnerEventMap> {
     return undefined;
   }
 
-  /** For server shutdown: no agent process may outlive Squadboard. */
-  async stopAll(): Promise<void> {
-    await Promise.all([...this.active.keys()].map((id) => this.stop(id)));
+  /** For server shutdown: no agent process may outlive Squadboard (Planner runs included). */
+  async stopAll(reason: string | null = null): Promise<void> {
+    await Promise.all([
+      ...[...this.active.keys()].map((id) => this.stop(id, reason)),
+      ...[...this.oneShots].map((stop) => stop()),
+    ]);
+  }
+
+  /**
+   * Runs `claude -p` once outside any task (the Planner). Same CLI, environment cleaning and
+   * process-tree stop as task runs; nothing is written to the database.
+   */
+  runOnce(input: OneShotInput): OneShotHandle {
+    const { prompt, cwd, onEvent, ...options } = input;
+    const args = buildClaudeArgs(prompt, { sessionId: randomUUID() }, options);
+    const subprocess = spawnClaude(this.claude, args, resolvePath(cwd), this.env);
+    const state: StopState = { stopRequested: false, reason: null };
+    const adapter = createClaudeStreamAdapter();
+    let result: AgentEventOf<'result'> | null = null;
+    let stderr = '';
+    subprocess.stderr?.setEncoding('utf8');
+    subprocess.stderr?.on('data', (chunk: string) => {
+      stderr += chunk;
+    });
+    const lines = subprocess.stdout
+      ? createInterface({ input: subprocess.stdout, crlfDelay: Infinity })
+      : null;
+    lines?.on('line', (line) => {
+      for (const event of adapter.push(line)) {
+        if (event.kind === 'result') result = event;
+        onEvent?.(event);
+      }
+    });
+
+    let finished: Promise<OneShotResult> | null = null;
+    const stop = async () => {
+      state.stopRequested = true;
+      if (subprocess.pid !== undefined) await killProcessTree(subprocess.pid, this.stopGraceMs);
+      await finished;
+    };
+    finished = (async (): Promise<OneShotResult> => {
+      const [processResult] = await Promise.all([
+        subprocess,
+        lines ? once(lines, 'close') : Promise.resolve(),
+      ]);
+      this.oneShots.delete(stop);
+      const final = result as AgentEventOf<'result'> | null;
+      if (state.stopRequested) return { status: 'stopped', result: final, error: null };
+      if (final && !final.isError) return { status: 'succeeded', result: final, error: null };
+      if (final) {
+        return {
+          status: 'failed',
+          result: final,
+          error: final.errors.join('; ') || final.subtype,
+        };
+      }
+      const cliError = classifyCliStderr(stderr);
+      return {
+        status: 'failed',
+        result: null,
+        error:
+          cliError?.message ??
+          (processResult.failed
+            ? (processResult.shortMessage ?? 'claude failed to start')
+            : `claude exited with code ${String(processResult.exitCode)} without a result`),
+      };
+    })();
+    this.oneShots.add(stop);
+    return { done: finished, stop };
   }
 
   isRunning(runId: string): boolean {
@@ -242,7 +343,7 @@ export class Runner extends EventEmitter<RunnerEventMap> {
     const subprocess = spawnClaude(this.claude, args, cwd, this.env);
 
     if (subprocess.pid !== undefined) updateRun(this.db, run.id, { pid: subprocess.pid });
-    const state = { stopRequested: false };
+    const state: StopState = { stopRequested: false, reason: null };
     const done = this.supervise(run.id, taskId, sessionId, subprocess, state);
     this.active.set(run.id, { taskId, pid: subprocess.pid, state, done });
     return { runId: run.id, sessionId, done };
@@ -253,7 +354,7 @@ export class Runner extends EventEmitter<RunnerEventMap> {
     taskId: string,
     sessionId: string,
     subprocess: ClaudeSubprocess,
-    active: { stopRequested: boolean },
+    active: StopState,
   ): Promise<RunOutcome> {
     const adapter = createClaudeStreamAdapter();
     let seq = 0;
@@ -296,6 +397,7 @@ export class Runner extends EventEmitter<RunnerEventMap> {
     if (active.stopRequested) {
       runStatus = 'stopped';
       taskStatus = 'stopped';
+      error = active.reason;
     } else if (finalResult) {
       if (finalResult.isError) {
         runStatus = 'failed';

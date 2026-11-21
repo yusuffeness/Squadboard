@@ -7,10 +7,21 @@ import {
   type RunStatus,
   type TaskStatus,
 } from '@squadboard/core';
-import { and, asc, desc, eq, gt, isNotNull } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNotNull, sql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import type { Db } from './index.js';
-import { decisions, events, projects, requests, runs, tasks } from './schema.js';
+import {
+  decisions,
+  events,
+  projects,
+  requests,
+  runs,
+  tasks,
+  type PlanStep,
+  type RequestStatus,
+} from './schema.js';
+
+export type { PlanStep, RequestStatus };
 
 // Thin data-access helpers. Task status changes always go through the core state machine.
 
@@ -48,7 +59,13 @@ export function createProject(
 
 export function createRequest(
   db: Db,
-  input: { projectId: string; text: string; plan?: PlanInput | null; id?: string },
+  input: {
+    projectId: string;
+    text: string;
+    plan?: PlanInput | null;
+    status?: RequestStatus | null;
+    id?: string;
+  },
 ): RequestRow {
   return db
     .insert(requests)
@@ -57,9 +74,46 @@ export function createRequest(
       projectId: input.projectId,
       text: input.text,
       plan: input.plan ?? null,
+      status: input.status ?? null,
     })
     .returning()
     .get();
+}
+
+export function getRequest(db: Db, id: string): RequestRow | undefined {
+  return db.select().from(requests).where(eq(requests.id, id)).get();
+}
+
+export function updateRequest(
+  db: Db,
+  id: string,
+  patch: Partial<Omit<RequestRow, 'id' | 'projectId' | 'createdAt'>>,
+): RequestRow {
+  return db.update(requests).set(patch).where(eq(requests.id, id)).returning().get();
+}
+
+/** Planned requests of a project (hand-made task requests have no status), newest first. */
+export function listPlanRequests(db: Db, projectId: string, limit = 20): RequestRow[] {
+  return db
+    .select()
+    .from(requests)
+    .where(and(eq(requests.projectId, projectId), isNotNull(requests.status)))
+    .orderBy(desc(requests.createdAt), desc(sql`rowid`))
+    .limit(limit)
+    .all();
+}
+
+export function listRequestsByStatus(db: Db, statuses: RequestStatus[]): RequestRow[] {
+  return db.select().from(requests).where(inArray(requests.status, statuses)).all();
+}
+
+export function listRequestTasks(db: Db, requestId: string): TaskRow[] {
+  return db
+    .select()
+    .from(tasks)
+    .where(eq(tasks.requestId, requestId))
+    .orderBy(asc(tasks.stage), asc(tasks.createdAt), asc(sql`tasks.rowid`))
+    .all();
 }
 
 export function createTask(
@@ -67,6 +121,8 @@ export function createTask(
   input: {
     requestId: string;
     title: string;
+    /** null/omitted: the request text is the prompt. */
+    prompt?: string | null;
     agent: string;
     dependsOn?: string[];
     expectedFiles?: string[];
@@ -83,6 +139,7 @@ export function createTask(
       id: input.id ?? randomUUID(),
       requestId: input.requestId,
       title: input.title,
+      prompt: input.prompt ?? null,
       agent: input.agent,
       dependsOn: input.dependsOn ?? [],
       expectedFiles: input.expectedFiles ?? [],
@@ -214,6 +271,15 @@ export function insertDecision(
     .get();
 }
 
+export function answerDecision(db: Db, id: string, choice: string): DecisionRow {
+  return db
+    .update(decisions)
+    .set({ choice, answeredAt: now() })
+    .where(eq(decisions.id, id))
+    .returning()
+    .get();
+}
+
 export function listDecisions(db: Db, taskId: string): DecisionRow[] {
   return db
     .select()
@@ -239,12 +305,15 @@ export interface RunSummary {
   endedAt: string | null;
 }
 
+/** A planned task has its own prompt; a hand-made one uses its request's text. */
+const taskPrompt = sql<string>`coalesce(${tasks.prompt}, ${requests.text})`;
+
 function runSummaryQuery(db: Db) {
   return db
     .select({
       id: runs.id,
       taskId: runs.taskId,
-      prompt: requests.text,
+      prompt: taskPrompt,
       cwd: runs.cwd,
       status: runs.status,
       taskStatus: tasks.status,
@@ -326,7 +395,7 @@ export interface TaskWithContext {
 
 export function getTaskWithContext(db: Db, id: string): TaskWithContext | undefined {
   return db
-    .select({ task: tasks, prompt: requests.text, projectId: requests.projectId })
+    .select({ task: tasks, prompt: taskPrompt, projectId: requests.projectId })
     .from(tasks)
     .innerJoin(requests, eq(tasks.requestId, requests.id))
     .where(eq(tasks.id, id))
@@ -335,11 +404,11 @@ export function getTaskWithContext(db: Db, id: string): TaskWithContext | undefi
 
 export function listProjectTasks(db: Db, projectId: string): TaskWithContext[] {
   return db
-    .select({ task: tasks, prompt: requests.text, projectId: requests.projectId })
+    .select({ task: tasks, prompt: taskPrompt, projectId: requests.projectId })
     .from(tasks)
     .innerJoin(requests, eq(tasks.requestId, requests.id))
     .where(eq(requests.projectId, projectId))
-    .orderBy(asc(tasks.createdAt))
+    .orderBy(asc(tasks.createdAt), asc(sql`tasks.rowid`))
     .all();
 }
 

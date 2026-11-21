@@ -33,19 +33,45 @@ export const projects = sqliteTable(
   (t) => [uniqueIndex('projects_path_idx').on(t.path)],
 );
 
+/**
+ * Where a planned request is (docs/ARCHITECTURE.md → "Plan akışı"). null = a request behind a
+ * hand-made task ("Yeni iş"), which the scheduler never touches.
+ */
+export type RequestStatus =
+  'planning' | 'awaiting_approval' | 'running' | 'interrupted' | 'done' | 'failed' | 'cancelled';
+
+/** One step the Planner run really reported (no invented progress). */
+export interface PlanStep {
+  id: string;
+  label: string;
+  detail: string | null;
+  status: 'running' | 'done' | 'failed';
+  startedAt: string;
+  endedAt: string | null;
+}
+
 export const requests = sqliteTable('requests', {
   id: text('id').primaryKey(),
   projectId: text('project_id')
     .notNull()
     .references(() => projects.id, { onDelete: 'cascade' }),
   text: text('text').notNull(),
+  /** The Planner's plan, with the user's edits (removed tasks, other agents). */
   plan: text('plan', { mode: 'json' }).$type<PlanInput>(),
+  status: text('status').$type<RequestStatus>(),
+  /** Why planning failed, in Turkish; `errorDetail` keeps the technical cause. */
+  error: text('error'),
+  errorDetail: text('error_detail'),
+  steps: text('steps', { mode: 'json' }).$type<PlanStep[]>().notNull().default([]),
+  /** Planner cost (both attempts), from the CLI's result. */
+  plannerCostUsd: real('planner_cost_usd'),
+  approvedAt: text('approved_at'),
   createdAt: createdAt(),
 });
 
 /**
  * `id` is globally unique. Plan task ids ("api", "db") are only unique inside one request,
- * so the server namespaces them when it turns a plan into tasks (Stage 6).
+ * so the server gives every planned task a new id when the plan is approved.
  */
 export const tasks = sqliteTable(
   'tasks',
@@ -55,6 +81,8 @@ export const tasks = sqliteTable(
       .notNull()
       .references(() => requests.id, { onDelete: 'cascade' }),
     title: text('title').notNull(),
+    /** The agent's instructions. null = the request text (a hand-made task). */
+    prompt: text('prompt'),
     agent: text('agent').notNull(),
     dependsOn: text('depends_on', { mode: 'json' }).$type<string[]>().notNull(),
     expectedFiles: text('expected_files', { mode: 'json' }).$type<string[]>().notNull(),
@@ -77,6 +105,11 @@ export const tasks = sqliteTable(
       .default([]),
     /** Last git problem for this task (worktree creation, commit), if any. */
     gitError: text('git_error'),
+    /**
+     * Why the scheduler could not start a ready task (e.g. its dependencies' branches conflict),
+     * in Turkish. Cleared when the task starts.
+     */
+    blockedReason: text('blocked_reason'),
     createdAt: createdAt(),
   },
   (t) => [index('tasks_request_idx').on(t.requestId)],

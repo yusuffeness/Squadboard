@@ -15,6 +15,13 @@
       "when": 1794921730211,
       "tag": "0001_task_worktrees",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1795277478401,
+      "tag": "0002_plans",
+      "breakpoints": true
     }
   ]
 }
