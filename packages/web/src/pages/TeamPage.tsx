@@ -43,7 +43,7 @@ function ProjectTeam({ project }: { project: ProjectView }) {
         project={project}
         result={view.result}
         onShowTeam={() => setView({ kind: 'auto' })}
-        onBoard={() => navigate({ page: 'pano', task: null })}
+        onBoard={() => navigate({ page: 'pano', task: null, plan: null })}
       />
     );
   }

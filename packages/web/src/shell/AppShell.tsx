@@ -110,7 +110,7 @@ function SideLink({
   return (
     <button
       type="button"
-      onClick={() => navigate({ page: item.page, task: null })}
+      onClick={() => navigate({ page: item.page, task: null, plan: null })}
       aria-current={active ? 'page' : undefined}
       className={`flex min-h-13 items-center gap-4 rounded-2xl px-4 text-lg font-semibold transition-colors ${
         active ? 'bg-surface text-ink shadow-card' : 'text-muted hover:bg-surface/60 hover:text-ink'
@@ -234,7 +234,7 @@ function MobileTabBar({ page, badge }: { page: Page; badge: number }) {
             <li key={item.page}>
               <button
                 type="button"
-                onClick={() => navigate({ page: item.page, task: null })}
+                onClick={() => navigate({ page: item.page, task: null, plan: null })}
                 aria-current={active ? 'page' : undefined}
                 className={`relative flex min-h-16 w-full flex-col items-center justify-center gap-1 text-xs font-bold ${
                   active ? 'text-accent' : 'text-muted'

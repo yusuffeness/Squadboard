@@ -12,8 +12,9 @@ import {
 import type { ReactNode } from 'react';
 import type { TaskView } from '../../api';
 import { STARTABLE, summarizeToolInput } from '../../format';
-import { agentName, useAgents } from '../../lib/agents';
+import { useAgents } from '../../lib/agents';
 import { taskLook } from '../../lib/board';
+import { blockedLine } from '../../lib/plan';
 import { useLiveTask, useTaskActions } from '../../lib/queries';
 import { navigate } from '../../lib/router';
 import { useUi } from '../../lib/store';
@@ -34,11 +35,7 @@ export function TaskCard({ task, all }: { task: TaskView; all: readonly TaskView
   const canStart = !task.active && STARTABLE.includes(task.status);
   const error = actions.start.error ?? actions.stop.error;
 
-  const deps = task.dependsOn
-    .map((id) => all.find((t) => t.id === id))
-    .filter(
-      (t): t is TaskView => t !== undefined && t.status !== 'in_review' && t.status !== 'done',
-    );
+  const waiting = blockedLine(task, all);
 
   // Latest thing the agent did, from the live stream (real data, no invented progress).
   const lastTool = [...stream.events].reverse().find((e) => e.event.kind === 'tool_use');
@@ -75,10 +72,17 @@ export function TaskCard({ task, all }: { task: TaskView; all: readonly TaskView
       </h3>
 
       <ul className="flex flex-col gap-1.5 text-sm text-muted empty:hidden">
-        {task.status === 'blocked' && deps.length > 0 && (
-          <Meta icon={Clock}>
-            {deps.map((d) => `${agentName(agents.byId(d.agent), mode)}: ${d.title}`).join(', ')}{' '}
-            bitince başlar
+        {waiting && (
+          <Meta
+            icon={waiting.tone === 'muted' ? Clock : TriangleAlert}
+            {...(waiting.tone === 'muted' ? {} : { tone: waiting.tone })}
+          >
+            {waiting.text}
+          </Meta>
+        )}
+        {task.interrupted && !task.active && (
+          <Meta icon={TriangleAlert} tone="warn">
+            Squadboard kapandığı için yarıda kesildi
           </Meta>
         )}
         {task.status === 'waiting_decision' && !task.active && (

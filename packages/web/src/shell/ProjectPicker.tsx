@@ -42,7 +42,7 @@ export function ProjectPicker() {
   function choose(id: string) {
     setProjectId(id);
     setOpen(false);
-    navigate({ task: null });
+    navigate({ task: null, plan: null });
   }
 
   return (
@@ -125,7 +125,7 @@ export function ProjectPicker() {
           setRemoving(null);
           if (id === projectId) {
             setProjectId(projects.data?.find((p) => p.id !== id)?.id ?? null);
-            navigate({ task: null });
+            navigate({ task: null, plan: null });
           }
         }}
       />
