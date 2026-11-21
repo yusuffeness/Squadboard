@@ -3,7 +3,10 @@ import { fileURLToPath } from 'node:url';
 import { openDatabase, type DbHandle } from './db/index.js';
 import { buildApp } from './app.js';
 import type { ClaudeCommand } from './runner/claude-cli.js';
-import { Runner } from './runner/runner.js';
+import { PlanService } from './plans/plan-service.js';
+import { recoverAfterRestart } from './plans/recovery.js';
+import { Scheduler } from './plans/scheduler.js';
+import { INTERRUPTED_ERROR, Runner } from './runner/runner.js';
 import { generateToken, originsFor } from './security.js';
 import { TaskService } from './tasks/task-service.js';
 
@@ -34,6 +37,8 @@ export interface RunningServer {
   app: FastifyInstance;
   runner: Runner;
   tasks: TaskService;
+  scheduler: Scheduler;
+  plans: PlanService;
   db: DbHandle;
   port: number;
   token: string;
@@ -45,6 +50,8 @@ export interface RunningServer {
 
 export async function startServer(options: StartServerOptions = {}): Promise<RunningServer> {
   const db = openDatabase(options.dbPath);
+  // Whatever the last process left "running" is gone now: show it as cut off.
+  recoverAfterRestart(db.db);
   const runnerOptions: ConstructorParameters<typeof Runner>[0] = { db: db.db };
   if (options.claude) runnerOptions.claude = options.claude;
   if (options.env) runnerOptions.env = options.env;
@@ -55,12 +62,17 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
       : { db: db.db, runner },
   );
 
+  const scheduler = new Scheduler(db.db, runner, tasks);
+  const plans = new PlanService(db.db, runner, tasks, scheduler);
+
   const token = options.token ?? generateToken();
   const allowedOrigins = new Set<string>(options.extraOrigins ?? []);
   const app = buildApp({
     db: db.db,
     runner,
     tasks,
+    scheduler,
+    plans,
     token,
     allowedOrigins,
     webDir: options.webDir ?? DEFAULT_WEB_DIR,
@@ -83,14 +95,18 @@ export async function startServer(options: StartServerOptions = {}): Promise<Run
   let closing: Promise<void> | undefined;
   const close = () => {
     closing ??= (async () => {
-      await runner.stopAll();
+      // No new starts; running plans wait for the user after the next start.
+      await scheduler.shutdown();
+      await runner.stopAll(INTERRUPTED_ERROR);
+      await plans.shutdown();
       // Post-run work (commits) may still be writing to the database.
       await tasks.drain();
+      await scheduler.idle();
       await app.close();
       db.close();
     })();
     return closing;
   };
 
-  return { app, runner, tasks, db, port, token, url, close };
+  return { app, runner, tasks, scheduler, plans, db, port, token, url, close };
 }
